@@ -1,6 +1,7 @@
 package model
 
 import (
+	"slices"
 	"time"
 )
 
@@ -15,6 +16,16 @@ type Profile struct {
 	Models      []Model     `json:"models" gorm:"foreignKey:ProfileID"` // 关联的模型
 	Rules       []RouteRule `json:"rules" gorm:"foreignKey:ProfileID"`  // 路由规则
 	Settings    string      `json:"settings" gorm:"type:text"`          // JSON 格式的额外设置
+
+	// 上下文压缩配置
+	EnableCompression     bool   `json:"enable_compression"`     // 启用压缩
+	CompressionStrategy   string `json:"compression_strategy"`   // rolling/summary/hybrid
+	MaxContextWindow     int    `json:"max_context_window"`   // 最大上下文
+
+	// 多模型组合配置
+	EnableMultiModel     bool   `json:"enable_multi_model"`    // 启用多模型
+	MultiModelConfig     string `json:"multi_model_config"`   // JSON 配置
+
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
 }
@@ -33,19 +44,21 @@ const (
 
 // Provider 定义模型供应商配置
 type Provider struct {
-	ID        string       `json:"id" gorm:"primaryKey"`
-	Name      string       `json:"name" gorm:"index"`
-	Type      ProviderType `json:"type"`
-	BaseURL   string       `json:"base_url"`
-	APIKey    string       `json:"api_key" gorm:"-"` // 不存储到数据库，加密存储
-	APIKeyEnc string       `json:"-" gorm:"column:api_key"`
-	Models    []Model      `json:"models" gorm:"foreignKey:ProviderID"`
-	Enabled   bool         `json:"enabled" gorm:"default:true"`
-	Priority  int          `json:"priority" gorm:"default:0"`   // 优先级，数值越高优先级越高
-	Weight    int          `json:"weight" gorm:"default:100"`   // 负载均衡权重
-	RateLimit int          `json:"rate_limit" gorm:"default:0"` // 每分钟请求限制，0表示无限制
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	ID           string       `json:"id" gorm:"primaryKey"`
+	Name         string       `json:"name" gorm:"index"`
+	Type         ProviderType `json:"type"`
+	BaseURL      string       `json:"base_url"`
+	APIKey       string       `json:"api_key" gorm:"-"` // 不存储到数据库，加密存储
+	APIKeyEnc    string       `json:"-" gorm:"column:api_key"`
+	DeploymentID string       `json:"deployment_id"` // Azure deployment name
+	APIVersion   string       `json:"api_version"`   // Azure API 版本
+	Models       []Model      `json:"models" gorm:"foreignKey:ProviderID"`
+	Enabled      bool         `json:"enabled" gorm:"default:true"`
+	Priority     int          `json:"priority" gorm:"default:0"`   // 优先级，数值越高优先级越高
+	Weight       int          `json:"weight" gorm:"default:100"`   // 负载均衡权重
+	RateLimit    int          `json:"rate_limit" gorm:"default:0"` // 每分钟请求限制，0表示无限制
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 }
 
 // Model 定义模型配置
@@ -62,9 +75,22 @@ type Model struct {
 	MaxTokens      int       `json:"max_tokens" gorm:"default:4096"`       // 最大输出token
 	InputPrice     float64   `json:"input_price" gorm:"default:0"`         // 输入价格（每1K token）
 	OutputPrice    float64   `json:"output_price" gorm:"default:0"`        // 输出价格（每1K token）
+
+	// 场景路由配置 (scene 策略)
+	Scene          string    `json:"scene"` // 场景标签: default/background/think/longContext
+	LongContextThreshold int   `json:"long_context_threshold"` // 触发长上下文的 token 阈值
+
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
+
+// Scene常量
+const (
+	SceneDefault      = "default"       // 默认场景
+	SceneBackground  = "background"   // 后台任务
+	SceneThink       = "think"        // 推理任务
+	SceneLongContext = "longContext"  // 长上下文
+)
 
 // RouteStrategy 定义路由策略
 type RouteStrategy string
@@ -74,6 +100,7 @@ const (
 	RouteStrategyWeighted RouteStrategy = "weighted" // 加权轮询
 	RouteStrategyFallback RouteStrategy = "fallback" // 故障转移
 	RouteStrategyAuto     RouteStrategy = "auto"     // 自动选择（根据延迟和可用性）
+	RouteStrategyScene   RouteStrategy = "scene"     // 场景路由
 )
 
 // RouteRule 定义路由规则
@@ -114,9 +141,70 @@ type APIKey struct {
 	Enabled       bool      `json:"enabled" gorm:"default:true"`
 	RateLimit     int       `json:"rate_limit" gorm:"default:0"`
 	AllowedModels []string  `json:"allowed_models" gorm:"serializer:json"` // 空数组表示允许所有模型
+	AllowedProfiles []string `json:"allowed_profiles" gorm:"serializer:json"` // 允许访问的 Profiles，空数组表示所有
+	ExpiredAt     *time.Time `json:"expired_at"` // 过期时间
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
+
+// CanAccess 检查 API Key 是否有权限访问指定 Profile
+func (a *APIKey) CanAccess(profile string) bool {
+	if !a.Enabled {
+		return false
+	}
+	// 检查是否过期
+	if a.ExpiredAt != nil && time.Now().After(*a.ExpiredAt) {
+		return false
+	}
+	// 空数组表示允许所有
+	if len(a.AllowedProfiles) == 0 {
+		return true
+	}
+	// 检查是否在允许列表中
+	return slices.Contains(a.AllowedProfiles, profile)
+}
+
+// Session 定义长期会话上下文
+type Session struct {
+	ID                string     `json:"id" gorm:"primaryKey"`
+	APIKeyID         string     `json:"api_key_id" gorm:"index"`
+	ProfileID        string     `json:"profile_id" gorm:"index"`
+	SessionKey       string     `json:"session_key" gorm:"uniqueIndex"` // 用户会话标识
+
+	// 上下文管理
+	ContextWindow     int        `json:"context_window"`      // 最大上下文窗口
+	CompressedTokens  int        `json:"compressed_tokens"`  // 压缩后 token 数
+
+	// 摘要状态
+	LastSummaryAt    *time.Time `json:"last_summary_at"`
+	SummaryVersion   int        `json:"summary_version"`
+
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+// SessionMessage 定义会话消息
+type SessionMessage struct {
+	ID              uint      `json:"id" gorm:"primaryKey"`
+	SessionID       string    `json:"session_id" gorm:"index"`
+	Role            string    `json:"role"` // user/assistant/system
+	Content         string    `json:"content"`
+	Tokens          int       `json:"tokens"`
+
+	// 压缩信息
+	IsCompressed      bool      `json:"is_compressed"`
+	CompressionLevel int       `json:"compression_level"` // 0=原始, 1=轻度, 2=中度, 3=摘要
+
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// CompressionLevel 常量
+const (
+	CompressionNone        = 0  // 不压缩
+	CompressionSliding    = 1  // 滑动窗口
+	CompressionSummary    = 2  // 摘要提取
+	CompressionAggressive = 3  // 激进压缩
+)
 
 // Stats 定义统计数据
 type Stats struct {

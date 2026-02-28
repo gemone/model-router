@@ -115,3 +115,30 @@ func (b *BaseAdapter) ConvertResponse(resp []byte) (*model.ChatCompletionRespons
 func (b *BaseAdapter) ConvertStreamResponse(data []byte) (*model.ChatCompletionStreamResponse, error) {
 	return nil, fmt.Errorf("not implemented")
 }
+
+// GetBaseURL 获取BaseURL
+func (b *BaseAdapter) GetBaseURL() string {
+	return b.baseURL
+}
+
+// GetHTTPClient 获取HTTP客户端
+func (b *BaseAdapter) GetHTTPClient() *http.Client {
+	return b.httpClient
+}
+
+// GetAPIKey 获取API Key
+func (b *BaseAdapter) GetAPIKey() string {
+	return b.apiKey
+}
+
+// DecryptAPIKey 解密API Key
+func (b *BaseAdapter) DecryptAPIKey(provider *model.Provider) (string, error) {
+	if provider.APIKeyEnc != "" {
+		decryptedKey, err := utils.Decrypt(provider.APIKeyEnc)
+		if err != nil {
+			return "", fmt.Errorf("failed to decrypt API key: %w", err)
+		}
+		return decryptedKey, nil
+	}
+	return provider.APIKey, nil
+}
