@@ -2,13 +2,14 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gemone/model-router/internal/config"
 	"github.com/gemone/model-router/internal/database"
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/service"
 	"github.com/gemone/model-router/internal/utils"
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
 
@@ -27,216 +28,202 @@ func NewAdminHandler() *AdminHandler {
 }
 
 // RegisterRoutes 注册管理路由
-func (h *AdminHandler) RegisterRoutes(r *gin.RouterGroup) {
+func (h *AdminHandler) RegisterRoutes(r fiber.Router) {
 	// Profile 管理
-	r.GET("/profiles", h.ListProfiles)
-	r.POST("/profiles", h.CreateProfile)
-	r.GET("/profiles/:id", h.GetProfile)
-	r.PUT("/profiles/:id", h.UpdateProfile)
-	r.DELETE("/profiles/:id", h.DeleteProfile)
+	r.Get("/profiles", h.ListProfiles)
+	r.Post("/profiles", h.CreateProfile)
+	r.Get("/profiles/:id", h.GetProfile)
+	r.Put("/profiles/:id", h.UpdateProfile)
+	r.Delete("/profiles/:id", h.DeleteProfile)
 
 	// Provider 管理
-	r.GET("/providers", h.ListProviders)
-	r.POST("/providers", h.CreateProvider)
-	r.GET("/providers/:id", h.GetProvider)
-	r.PUT("/providers/:id", h.UpdateProvider)
-	r.DELETE("/providers/:id", h.DeleteProvider)
+	r.Get("/providers", h.ListProviders)
+	r.Post("/providers", h.CreateProvider)
+	r.Get("/providers/:id", h.GetProvider)
+	r.Put("/providers/:id", h.UpdateProvider)
+	r.Delete("/providers/:id", h.DeleteProvider)
 
 	// Model 管理
-	r.GET("/models", h.ListModels)
-	r.POST("/models", h.CreateModel)
-	r.GET("/models/:id", h.GetModel)
-	r.PUT("/models/:id", h.UpdateModel)
-	r.DELETE("/models/:id", h.DeleteModel)
+	r.Get("/models", h.ListModels)
+	r.Post("/models", h.CreateModel)
+	r.Get("/models/:id", h.GetModel)
+	r.Put("/models/:id", h.UpdateModel)
+	r.Delete("/models/:id", h.DeleteModel)
 
 	// Route 管理
-	r.GET("/routes", h.ListRoutes)
-	r.POST("/routes", h.CreateRoute)
-	r.GET("/routes/:id", h.GetRoute)
-	r.PUT("/routes/:id", h.UpdateRoute)
-	r.DELETE("/routes/:id", h.DeleteRoute)
+	r.Get("/routes", h.ListRoutes)
+	r.Post("/routes", h.CreateRoute)
+	r.Get("/routes/:id", h.GetRoute)
+	r.Put("/routes/:id", h.UpdateRoute)
+	r.Delete("/routes/:id", h.DeleteRoute)
 
 	// 统计数据
-	r.GET("/stats/dashboard", h.GetDashboardStats)
-	r.GET("/stats/provider/:id", h.GetProviderStats)
-	r.GET("/stats/model/:name", h.GetModelStats)
+	r.Get("/stats/dashboard", h.GetDashboardStats)
+	r.Get("/stats/provider/:id", h.GetProviderStats)
+	r.Get("/stats/model/:name", h.GetModelStats)
 
 	// 日志
-	r.GET("/logs", h.GetLogs)
+	r.Get("/logs", h.GetLogs)
 
 	// 测试
-	r.POST("/test", h.TestModel)
-	
+	r.Post("/test", h.TestModel)
+
 	// 模型能力检测
-	r.POST("/models/detect-capabilities", h.DetectModelCapabilities)
+	r.Post("/models/detect-capabilities", h.DetectModelCapabilities)
 
 	// 设置管理
-	r.GET("/settings", h.GetSettings)
-	r.PUT("/settings", h.UpdateSettings)
+	r.Get("/settings", h.GetSettings)
+	r.Put("/settings", h.UpdateSettings)
 }
 
 // ==================== Profile 管理 ====================
 
 // ListProfiles 列出所有 Profile
-func (h *AdminHandler) ListProfiles(c *gin.Context) {
+func (h *AdminHandler) ListProfiles(c *fiber.Ctx) error {
 	profiles := h.profileManager.GetAllProfiles()
-	c.JSON(http.StatusOK, profiles)
+	return c.JSON(profiles)
 }
 
 // GetProfile 获取单个 Profile
-func (h *AdminHandler) GetProfile(c *gin.Context) {
-	id := c.Param("id")
+func (h *AdminHandler) GetProfile(c *fiber.Ctx) error {
+	id := c.Params("id")
 	profile := h.profileManager.GetProfileByID(id)
 	if profile == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
 	}
-	c.JSON(http.StatusOK, profile.Profile)
+	return c.JSON(profile.Profile)
 }
 
 // CreateProfile 创建 Profile
-func (h *AdminHandler) CreateProfile(c *gin.Context) {
+func (h *AdminHandler) CreateProfile(c *fiber.Ctx) error {
 	var profile model.Profile
-	if err := c.ShouldBindJSON(&profile); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&profile); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	profile.ID = uuid.New().String()
-	
+
 	if err := h.profileManager.CreateProfile(&profile); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	c.JSON(http.StatusCreated, profile)
+	return c.Status(http.StatusCreated).JSON(profile)
 }
 
 // UpdateProfile 更新 Profile
-func (h *AdminHandler) UpdateProfile(c *gin.Context) {
-	id := c.Param("id")
+func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
+	id := c.Params("id")
 	var profile model.Profile
-	if err := c.ShouldBindJSON(&profile); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&profile); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	profile.ID = id
-	
+
 	if err := h.profileManager.UpdateProfile(&profile); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	c.JSON(http.StatusOK, profile)
+	return c.JSON(profile)
 }
 
 // DeleteProfile 删除 Profile
-func (h *AdminHandler) DeleteProfile(c *gin.Context) {
-	id := c.Param("id")
+func (h *AdminHandler) DeleteProfile(c *fiber.Ctx) error {
+	id := c.Params("id")
 	if err := h.profileManager.DeleteProfile(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	c.JSON(http.StatusNoContent, nil)
+	return c.SendStatus(http.StatusNoContent)
 }
 
 // ==================== Provider 管理 ====================
 
 // ListProviders 列出 Provider
-func (h *AdminHandler) ListProviders(c *gin.Context) {
+func (h *AdminHandler) ListProviders(c *fiber.Ctx) error {
 	db := database.GetDB()
 	var providers []model.Provider
 	if err := db.Find(&providers).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 不返回加密的API密钥
 	for i := range providers {
 		providers[i].APIKey = ""
 		providers[i].APIKeyEnc = ""
 	}
-	
-	c.JSON(http.StatusOK, providers)
+
+	return c.JSON(providers)
 }
 
 // GetProvider 获取单个 Provider
-func (h *AdminHandler) GetProvider(c *gin.Context) {
-	id := c.Param("id")
+func (h *AdminHandler) GetProvider(c *fiber.Ctx) error {
+	id := c.Params("id")
 	db := database.GetDB()
-	
+
 	var provider model.Provider
 	if err := db.First(&provider, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "provider not found"})
 	}
-	
-	// 不返回加密的API密钥
+
 	provider.APIKey = ""
 	provider.APIKeyEnc = ""
-	
-	c.JSON(http.StatusOK, provider)
+
+	return c.JSON(provider)
 }
 
 // CreateProvider 创建 Provider
-func (h *AdminHandler) CreateProvider(c *gin.Context) {
+func (h *AdminHandler) CreateProvider(c *fiber.Ctx) error {
 	var req struct {
 		model.Provider
 		APIKey string `json:"api_key"`
 	}
-	
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	provider := req.Provider
 	provider.ID = uuid.New().String()
-	
+
 	// 加密API密钥
 	if req.APIKey != "" {
 		encrypted, err := utils.Encrypt(req.APIKey)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt API key"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to encrypt API key"})
 		}
 		provider.APIKeyEnc = encrypted
 	}
-	
+
 	db := database.GetDB()
 	if err := db.Create(&provider).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
+
 	provider.APIKey = ""
 	provider.APIKeyEnc = ""
-	c.JSON(http.StatusCreated, provider)
+	return c.Status(http.StatusCreated).JSON(provider)
 }
 
 // UpdateProvider 更新 Provider
-func (h *AdminHandler) UpdateProvider(c *gin.Context) {
-	id := c.Param("id")
-	
+func (h *AdminHandler) UpdateProvider(c *fiber.Ctx) error {
+	id := c.Params("id")
+
 	var req struct {
 		model.Provider
 		APIKey string `json:"api_key"`
 	}
-	
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	db := database.GetDB()
-	
+
 	var provider model.Provider
 	if err := db.First(&provider, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "provider not found"})
 	}
-	
+
 	// 更新字段
 	provider.Name = req.Name
 	provider.Type = req.Type
@@ -245,58 +232,55 @@ func (h *AdminHandler) UpdateProvider(c *gin.Context) {
 	provider.Priority = req.Priority
 	provider.Weight = req.Weight
 	provider.RateLimit = req.RateLimit
-	
+
 	// 如果提供了新的API密钥，更新它
 	if req.APIKey != "" {
 		encrypted, err := utils.Encrypt(req.APIKey)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt API key"})
-			return
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to encrypt API key"})
 		}
 		provider.APIKeyEnc = encrypted
 	}
-	
+
 	if err := db.Save(&provider).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
+
 	provider.APIKey = ""
 	provider.APIKeyEnc = ""
-	c.JSON(http.StatusOK, provider)
+	return c.JSON(provider)
 }
 
 // DeleteProvider 删除 Provider
-func (h *AdminHandler) DeleteProvider(c *gin.Context) {
-	id := c.Param("id")
-	
+func (h *AdminHandler) DeleteProvider(c *fiber.Ctx) error {
+	id := c.Params("id")
+
 	db := database.GetDB()
-	
+
 	// 删除关联的模型
 	db.Where("provider_id = ?", id).Delete(&model.Model{})
-	
+
 	// 删除 Provider
 	if err := db.Delete(&model.Provider{}, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
-	c.JSON(http.StatusNoContent, nil)
+
+	return c.SendStatus(http.StatusNoContent)
 }
 
 // ==================== Model 管理 ====================
 
 // ListModels 列出 Model
-func (h *AdminHandler) ListModels(c *gin.Context) {
+func (h *AdminHandler) ListModels(c *fiber.Ctx) error {
 	db := database.GetDB()
 	var models []model.Model
-	
+
 	query := db
 	if profileID := c.Query("profile_id"); profileID != "" {
 		query = query.Where("profile_id = ?", profileID)
@@ -304,265 +288,248 @@ func (h *AdminHandler) ListModels(c *gin.Context) {
 	if providerID := c.Query("provider_id"); providerID != "" {
 		query = query.Where("provider_id = ?", providerID)
 	}
-	
+
 	if err := query.Find(&models).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
-	c.JSON(http.StatusOK, models)
+
+	return c.JSON(models)
 }
 
 // GetModel 获取单个 Model
-func (h *AdminHandler) GetModel(c *gin.Context) {
-	id := c.Param("id")
+func (h *AdminHandler) GetModel(c *fiber.Ctx) error {
+	id := c.Params("id")
 	db := database.GetDB()
-	
+
 	var m model.Model
 	if err := db.First(&m, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "model not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "model not found"})
 	}
-	
-	c.JSON(http.StatusOK, m)
+
+	return c.JSON(m)
 }
 
 // CreateModel 创建 Model
-func (h *AdminHandler) CreateModel(c *gin.Context) {
+func (h *AdminHandler) CreateModel(c *fiber.Ctx) error {
 	var m model.Model
-	if err := c.ShouldBindJSON(&m); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&m); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	m.ID = uuid.New().String()
-	
+
 	db := database.GetDB()
 	if err := db.Create(&m).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
-	c.JSON(http.StatusCreated, m)
+
+	return c.Status(http.StatusCreated).JSON(m)
 }
 
 // UpdateModel 更新 Model
-func (h *AdminHandler) UpdateModel(c *gin.Context) {
-	id := c.Param("id")
-	
+func (h *AdminHandler) UpdateModel(c *fiber.Ctx) error {
+	id := c.Params("id")
+
 	var m model.Model
-	if err := c.ShouldBindJSON(&m); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&m); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	m.ID = id
-	
+
 	db := database.GetDB()
-	
+
 	var existing model.Model
 	if err := db.First(&existing, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "model not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "model not found"})
 	}
-	
+
 	if err := db.Save(&m).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
-	c.JSON(http.StatusOK, m)
+
+	return c.JSON(m)
 }
 
 // DeleteModel 删除 Model
-func (h *AdminHandler) DeleteModel(c *gin.Context) {
-	id := c.Param("id")
-	
+func (h *AdminHandler) DeleteModel(c *fiber.Ctx) error {
+	id := c.Params("id")
+
 	db := database.GetDB()
 	if err := db.Delete(&model.Model{}, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
-	c.JSON(http.StatusNoContent, nil)
+
+	return c.SendStatus(http.StatusNoContent)
 }
 
 // DetectModelCapabilities 检测模型能力
-func (h *AdminHandler) DetectModelCapabilities(c *gin.Context) {
+func (h *AdminHandler) DetectModelCapabilities(c *fiber.Ctx) error {
 	var req struct {
-		ProviderID string `json:"provider_id" binding:"required"`
-		ModelName  string `json:"model_name" binding:"required"`
+		ProviderID string `json:"provider_id"`
+		ModelName  string `json:"model_name"`
 	}
-	
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	
-	// 这里可以实现实际的模型能力检测逻辑
-	// 例如发送测试请求检测是否支持 function calling 和 vision
-	c.JSON(http.StatusOK, gin.H{
+
+	return c.JSON(fiber.Map{
 		"supports_function": false,
 		"supports_vision":   false,
-		"message":           "Capabilities detection not implemented yet",
+		"message":          "Capabilities detection not implemented yet",
 	})
 }
 
 // ==================== Route 管理 ====================
 
 // ListRoutes 列出 Route Rules
-func (h *AdminHandler) ListRoutes(c *gin.Context) {
+func (h *AdminHandler) ListRoutes(c *fiber.Ctx) error {
 	db := database.GetDB()
 	var rules []model.RouteRule
-	
+
 	if err := db.Find(&rules).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
-	c.JSON(http.StatusOK, rules)
+
+	return c.JSON(rules)
 }
 
 // GetRoute 获取单个 Route
-func (h *AdminHandler) GetRoute(c *gin.Context) {
-	id := c.Param("id")
+func (h *AdminHandler) GetRoute(c *fiber.Ctx) error {
+	id := c.Params("id")
 	db := database.GetDB()
-	
+
 	var rule model.RouteRule
 	if err := db.First(&rule, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "route not found"})
 	}
-	
-	c.JSON(http.StatusOK, rule)
+
+	return c.JSON(rule)
 }
 
 // CreateRoute 创建 Route Rule
-func (h *AdminHandler) CreateRoute(c *gin.Context) {
+func (h *AdminHandler) CreateRoute(c *fiber.Ctx) error {
 	var rule model.RouteRule
-	if err := c.ShouldBindJSON(&rule); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&rule); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	rule.ID = uuid.New().String()
-	
+
 	db := database.GetDB()
 	if err := db.Create(&rule).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
-	c.JSON(http.StatusCreated, rule)
+
+	return c.Status(http.StatusCreated).JSON(rule)
 }
 
 // UpdateRoute 更新 Route Rule
-func (h *AdminHandler) UpdateRoute(c *gin.Context) {
-	id := c.Param("id")
-	
+func (h *AdminHandler) UpdateRoute(c *fiber.Ctx) error {
+	id := c.Params("id")
+
 	var rule model.RouteRule
-	if err := c.ShouldBindJSON(&rule); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&rule); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	rule.ID = id
-	
+
 	db := database.GetDB()
-	
+
 	var existing model.RouteRule
 	if err := db.First(&existing, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "route not found"})
 	}
-	
+
 	if err := db.Save(&rule).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
-	c.JSON(http.StatusOK, rule)
+
+	return c.JSON(rule)
 }
 
 // DeleteRoute 删除 Route Rule
-func (h *AdminHandler) DeleteRoute(c *gin.Context) {
-	id := c.Param("id")
-	
+func (h *AdminHandler) DeleteRoute(c *fiber.Ctx) error {
+	id := c.Params("id")
+
 	db := database.GetDB()
 	if err := db.Delete(&model.RouteRule{}, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	
+
 	// 刷新 Profile
 	h.profileManager.RefreshAll()
-	
-	c.JSON(http.StatusNoContent, nil)
+
+	return c.SendStatus(http.StatusNoContent)
 }
 
 // ==================== 统计数据 ====================
 
 // GetDashboardStats 获取仪表盘统计
-func (h *AdminHandler) GetDashboardStats(c *gin.Context) {
+func (h *AdminHandler) GetDashboardStats(c *fiber.Ctx) error {
 	stats := h.stats.GetDashboardStats()
-	
+
 	// 添加活跃模型和供应商数量
 	db := database.GetDB()
 	var modelCount, providerCount int64
 	db.Model(&model.Model{}).Where("enabled = ?", true).Count(&modelCount)
 	db.Model(&model.Provider{}).Where("enabled = ?", true).Count(&providerCount)
-	
+
 	stats["active_models"] = modelCount
 	stats["active_providers"] = providerCount
-	
-	c.JSON(http.StatusOK, stats)
+
+	return c.JSON(stats)
 }
 
 // GetProviderStats 获取 Provider 统计
-func (h *AdminHandler) GetProviderStats(c *gin.Context) {
-	id := c.Param("id")
+func (h *AdminHandler) GetProviderStats(c *fiber.Ctx) error {
+	id := c.Params("id")
 	stats := h.stats.GetProviderStats(id)
-	c.JSON(http.StatusOK, stats)
+	return c.JSON(stats)
 }
 
 // GetModelStats 获取 Model 统计
-func (h *AdminHandler) GetModelStats(c *gin.Context) {
-	name := c.Param("name")
+func (h *AdminHandler) GetModelStats(c *fiber.Ctx) error {
+	name := c.Params("name")
 	stats := h.stats.GetModelStats(name)
-	c.JSON(http.StatusOK, stats)
+	return c.JSON(stats)
 }
 
 // ==================== 日志 ====================
 
 // GetLogs 获取日志
-func (h *AdminHandler) GetLogs(c *gin.Context) {
+func (h *AdminHandler) GetLogs(c *fiber.Ctx) error {
 	page := 1
 	pageSize := 50
-	
-	// 解析分页参数
+
 	if p := c.Query("page"); p != "" {
-		// 简单的字符串转int，实际应该使用strconv.Atoi并处理错误
-		// 这里简化处理
+		if parsed, err := strconv.Atoi(p); err == nil {
+			page = parsed
+		}
 	}
 	if ps := c.Query("page_size"); ps != "" {
-		// 同上
+		if parsed, err := strconv.Atoi(ps); err == nil {
+			pageSize = parsed
+		}
 	}
-	
+
 	logs, total := h.stats.GetRequestLogs(page, pageSize)
-	c.JSON(http.StatusOK, gin.H{
+	return c.JSON(fiber.Map{
 		"logs":  logs,
 		"total": total,
 	})
@@ -571,29 +538,26 @@ func (h *AdminHandler) GetLogs(c *gin.Context) {
 // ==================== 测试 ====================
 
 // TestModel 测试模型
-func (h *AdminHandler) TestModel(c *gin.Context) {
+func (h *AdminHandler) TestModel(c *fiber.Ctx) error {
 	var req struct {
-		ProviderID string `json:"provider_id" binding:"required"`
-		Model      string `json:"model" binding:"required"`
+		ProviderID string `json:"provider_id"`
+		Model      string `json:"model"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	profile := h.profileManager.GetDefaultProfile()
 	if profile == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no profile available"})
-		return
+		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "no profile available"})
 	}
 
-	result, err := profile.TestModel(c.Request.Context(), req.ProviderID, req.Model)
+	result, err := profile.TestModel(c.Context(), req.ProviderID, req.Model)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 
-	c.JSON(http.StatusOK, result)
+	return c.JSON(result)
 }
 
 // ==================== 设置管理 ====================
@@ -614,36 +578,33 @@ type SettingsRequest struct {
 }
 
 // GetSettings 获取系统设置
-func (h *AdminHandler) GetSettings(c *gin.Context) {
+func (h *AdminHandler) GetSettings(c *fiber.Ctx) error {
 	cfg := config.Get()
 
-	settings := gin.H{
+	settings := fiber.Map{
 		"port":            cfg.Port,
 		"host":            cfg.Host,
-		"language":        "zh-CN", // 默认语言
+		"language":        "zh-CN",
 		"enable_cors":     cfg.EnableCORS,
 		"enable_stats":    cfg.EnableStats,
 		"enable_fallback": cfg.EnableFallback,
-		"admin_token":     "", // 不返回实际的 token
-		"jwt_secret":      "", // 不返回实际的 secret
+		"admin_token":     "",
+		"jwt_secret":      "",
 		"log_level":       cfg.LogLevel,
 		"max_retries":     cfg.MaxRetries,
 		"db_path":         cfg.DBPath,
 	}
 
-	c.JSON(http.StatusOK, settings)
+	return c.JSON(settings)
 }
 
 // UpdateSettings 更新系统设置
-func (h *AdminHandler) UpdateSettings(c *gin.Context) {
+func (h *AdminHandler) UpdateSettings(c *fiber.Ctx) error {
 	var req SettingsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 注意：这里只更新内存中的配置
-	// 实际生产环境应该重启服务或更新环境变量
 	cfg := config.Get()
 
 	if req.Port > 0 && req.Port <= 65535 {
@@ -671,8 +632,7 @@ func (h *AdminHandler) UpdateSettings(c *gin.Context) {
 		cfg.DBPath = req.DBPath
 	}
 
-	// 返回更新后的设置（不返回敏感信息）
-	response := gin.H{
+	response := fiber.Map{
 		"port":            cfg.Port,
 		"host":            cfg.Host,
 		"language":        req.Language,
@@ -687,5 +647,5 @@ func (h *AdminHandler) UpdateSettings(c *gin.Context) {
 		"message":         "Settings updated. Some changes may require server restart.",
 	}
 
-	c.JSON(http.StatusOK, response)
+	return c.JSON(response)
 }

@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"net/http"
-	"strings"
 
 	"github.com/gemone/model-router/internal/config"
 	"github.com/gemone/model-router/internal/database"
@@ -12,7 +10,10 @@ import (
 	"github.com/gemone/model-router/internal/service"
 	"github.com/gemone/model-router/internal/utils"
 	"github.com/gemone/model-router/internal/web"
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 
 	// Import adapters to register them
 	_ "github.com/gemone/model-router/internal/adapter/anthropic"
@@ -39,49 +40,42 @@ func main() {
 	service.GetStatsCollector()
 	service.GetProfileManager()
 
-	// 设置 Gin 模式
-	if cfg.LogLevel == "debug" {
-		gin.SetMode(gin.DebugMode)
-	} else {
-		gin.SetMode(gin.ReleaseMode)
-	}
+	// 创建 Fiber 应用
+	app := fiber.New(fiber.Config{
+		AppName:      "Model Router",
+		ErrorHandler: customErrorHandler,
+	})
 
-	// 创建路由
-	r := gin.New()
-	r.Use(gin.Recovery())
+	// 全局中间件
+	app.Use(recover.New())
+	app.Use(logger.New())
 
 	// CORS
 	if cfg.EnableCORS {
-		r.Use(corsMiddleware())
+		app.Use(cors.New())
 	}
 
-	// 日志
-	r.Use(requestLogger())
-
-	// Web UI - 放在 API 路由之前
+	// Web UI - 静态文件服务
 	if fs := web.FS(); fs != nil {
-		// 嵌入模式：服务静态文件
-		// 使用 NoRoute 来处理前端路由，避免与 API 路由冲突
-		r.NoRoute(func(c *gin.Context) {
-			path := c.Request.URL.Path
-			// API 请求返回 404
-			if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/v1/") {
-				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
-				return
+		app.Use(func(c *fiber.Ctx) error {
+			path := c.Path()
+			// API 请求继续处理，不服务静态文件
+			if len(path) >= 5 && (path[:5] == "/api/" || path[:4] == "/v1/") {
+				return c.Next()
 			}
-			// 静态文件服务
-			http.FileServer(fs).ServeHTTP(c.Writer, c.Request)
+			// 其他请求尝试服务静态文件
+			return c.SendFile(c.Path())
 		})
 	}
 
 	// Admin API
 	adminHandler := handler.NewAdminHandler()
-	admin := r.Group("/api/admin")
+	admin := app.Group("/api/admin")
 	adminHandler.RegisterRoutes(admin)
 
 	// API 路由（包括 OpenAI 兼容接口）
 	apiHandler := handler.NewAPIHandler()
-	apiHandler.RegisterRoutes(r)
+	apiHandler.RegisterRoutes(app)
 
 	// 启动服务
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -89,36 +83,18 @@ func main() {
 	log.Printf("API Endpoint: http://%s/api/{profile}/v1/chat/completions", addr)
 	log.Printf("Admin UI: http://%s/", addr)
 
-	if err := r.Run(addr); err != nil {
+	if err := app.Listen(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
 
-// CORS 中间件
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
+// customErrorHandler 自定义错误处理
+func customErrorHandler(c *fiber.Ctx, err error) error {
+	code := fiber.StatusInternalServerError
+	if e, ok := err.(*fiber.Error); ok {
+		code = e.Code
 	}
-}
-
-// 请求日志中间件
-func requestLogger() gin.HandlerFunc {
-	return gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		return fmt.Sprintf("[%s] %s %s %d %s\n",
-			param.TimeStamp.Format("2006-01-02 15:04:05"),
-			param.Method,
-			param.Path,
-			param.StatusCode,
-			param.Latency,
-		)
+	return c.Status(code).JSON(fiber.Map{
+		"error": err.Error(),
 	})
 }

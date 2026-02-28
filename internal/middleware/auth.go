@@ -5,21 +5,20 @@ import (
 	"net/http"
 
 	"github.com/gemone/model-router/internal/config"
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 )
 
 // AdminAuth admin 认证中间件
-func AdminAuth() gin.HandlerFunc {
-	return func(c *gin.Context) {
+func AdminAuth() fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		cfg := config.Get()
 
 		// 如果没有配置 AdminToken，跳过认证
 		if cfg.AdminToken == "" {
-			c.Next()
-			return
+			return c.Next()
 		}
 
-		token := c.GetHeader("Authorization")
+		token := c.Get("Authorization")
 		if token == "" {
 			token = c.Query("token")
 		}
@@ -31,13 +30,12 @@ func AdminAuth() gin.HandlerFunc {
 
 		// 使用常量时间比较防止时序攻击
 		if subtle.ConstantTimeCompare([]byte(token), []byte(cfg.AdminToken)) != 1 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "unauthorized",
+			return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+				"error":   "unauthorized",
 				"message": "invalid or missing admin token",
 			})
-			return
 		}
 
-		c.Next()
+		return c.Next()
 	}
 }

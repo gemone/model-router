@@ -9,9 +9,8 @@ import (
 
 	"github.com/gemone/model-router/internal/config"
 	"github.com/gemone/model-router/internal/model"
-	"github.com/gemone/model-router/internal/proxy"
 	"github.com/gemone/model-router/internal/service"
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
 
@@ -19,7 +18,6 @@ import (
 type APIHandler struct {
 	profileManager *service.ProfileManager
 	stats          *service.StatsCollector
-	proxy          *proxy.Proxy
 	debug          bool
 }
 
@@ -29,297 +27,160 @@ func NewAPIHandler() *APIHandler {
 	return &APIHandler{
 		profileManager: service.GetProfileManager(),
 		stats:          service.GetStatsCollector(),
-		proxy:          proxy.GetProxy(),
 		debug:          cfg.LogLevel == "debug",
 	}
 }
 
 // RegisterRoutes 注册路由
-func (h *APIHandler) RegisterRoutes(r *gin.Engine) {
-	// 支持多种 URI 格式：
-	// /api/{profile}/v1/...
-	// /api/{profile}/claude/...
-	// /{profile}/v1/...
-	// /v1/... (使用默认 profile)
-
+func (h *APIHandler) RegisterRoutes(app *fiber.App) {
 	// OpenAI 兼容 API
-	r.POST("/api/:profile/v1/chat/completions", h.handleChatCompletion)
-	r.POST("/api/:profile/v1/embeddings", h.handleEmbeddings)
-	r.GET("/api/:profile/v1/models", h.handleListModels)
+	app.Post("/api/:profile/v1/chat/completions", h.handleChatCompletion)
+	app.Post("/api/:profile/v1/embeddings", h.handleEmbeddings)
+	app.Get("/api/:profile/v1/models", h.handleListModels)
 
 	// 递进式格式 /api/{format}/{profile}/...
-	r.POST("/api/openai/:profile/v1/chat/completions", h.handleChatCompletion)
-	r.POST("/api/openai/:profile/v1/embeddings", h.handleEmbeddings)
-	r.GET("/api/openai/:profile/v1/models", h.handleListModels)
+	app.Post("/api/openai/:profile/v1/chat/completions", h.handleChatCompletion)
+	app.Post("/api/openai/:profile/v1/embeddings", h.handleEmbeddings)
+	app.Get("/api/openai/:profile/v1/models", h.handleListModels)
 
 	// Claude 格式
-	r.POST("/api/claude/:profile/v1/messages", h.handleClaudeMessages)
-	r.GET("/api/claude/:profile/v1/models", h.handleListModels)
+	app.Post("/api/claude/:profile/v1/messages", h.handleClaudeMessages)
+	app.Get("/api/claude/:profile/v1/models", h.handleListModels)
 
 	// 简写格式
-	r.POST("/:profile/v1/chat/completions", h.handleChatCompletion)
-	r.POST("/:profile/v1/embeddings", h.handleEmbeddings)
-	r.GET("/:profile/v1/models", h.handleListModels)
+	app.Post("/:profile/v1/chat/completions", h.handleChatCompletion)
+	app.Post("/:profile/v1/embeddings", h.handleEmbeddings)
+	app.Get("/:profile/v1/models", h.handleListModels)
 
 	// 默认 profile（不带 profile 前缀）
-	r.POST("/v1/chat/completions", h.handleDefaultChatCompletion)
-	r.POST("/v1/embeddings", h.handleDefaultEmbeddings)
-	r.GET("/v1/models", h.handleDefaultListModels)
+	app.Post("/v1/chat/completions", h.handleDefaultChatCompletion)
+	app.Post("/v1/embeddings", h.handleDefaultEmbeddings)
+	app.Get("/v1/models", h.handleDefaultListModels)
 }
 
 // handleChatCompletion 处理聊天完成请求
-func (h *APIHandler) handleChatCompletion(c *gin.Context) {
-	profilePath := c.Param("profile")
-	h.processChatCompletion(c, profilePath)
+func (h *APIHandler) handleChatCompletion(c *fiber.Ctx) error {
+	profilePath := c.Params("profile")
+	return h.processChatCompletion(c, profilePath)
 }
 
 // handleDefaultChatCompletion 处理默认 Profile 的聊天完成
-func (h *APIHandler) handleDefaultChatCompletion(c *gin.Context) {
-	h.processChatCompletion(c, "")
+func (h *APIHandler) handleDefaultChatCompletion(c *fiber.Ctx) error {
+	return h.processChatCompletion(c, "")
 }
 
 // processChatCompletion 处理聊天完成
-func (h *APIHandler) processChatCompletion(c *gin.Context, profilePath string) {
+func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) error {
 	requestID := uuid.New().String()
 	start := time.Now()
 
 	// 获取 Profile
 	profile := h.profileManager.GetProfile(profilePath)
 	if profile == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
 	}
 
-	// 检查是否可以直接透传（OpenAI Compatible 适配器）
-	if h.canPassthrough(profile) && !h.debug {
-		h.passthroughChatCompletion(c, profile, requestID, start)
-		return
-	}
-
-	// 需要格式转换
-	h.handleChatCompletionWithTransform(c, profile, requestID, start)
-}
-
-// canPassthrough 检查是否可以直接透传
-func (h *APIHandler) canPassthrough(profile *service.ProfileInstance) bool {
-	// 如果 profile 只有一个适配器且是 OpenAI 兼容类型，可以直接透传
-	providers := profile.GetProviders()
-	if len(providers) != 1 {
-		return false
-	}
-
-	switch providers[0].Type {
-	case model.ProviderOpenAI, model.ProviderDeepSeek, model.ProviderOpenAICompatible:
-		return true
-	default:
-		return false
-	}
-}
-
-// passthroughChatCompletion 直接透传聊天完成
-func (h *APIHandler) passthroughChatCompletion(c *gin.Context, profile *service.ProfileInstance, requestID string, start time.Time) {
-	// 获取模型名称
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
-		return
-	}
-
+	// 解析请求体
 	var req model.ChatCompletionRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		// 如果解析失败，直接透传
-		c.Request.Body = io.NopCloser(strings.NewReader(string(body)))
-		h.doPassthrough(c, profile, "/v1/chat/completions")
-		return
-	}
-
-	// 路由到具体模型
-	routeResult, err := profile.Route(c.Request.Context(), req.Model)
-	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-		return
-	}
-
-	// 重写请求中的模型名称为原始名称
-	req.Model = routeResult.Model.OriginalName
-	newBody, _ := json.Marshal(req)
-
-	// 构建目标 URL
-	targetURL := routeResult.Provider.BaseURL + "/v1/chat/completions"
-	headers := routeResult.Adapter.GetRequestHeaders()
-
-	// 设置 SSE headers（如果是流式请求）
-	if req.Stream {
-		c.Request.Body = io.NopCloser(strings.NewReader(string(newBody)))
-		err := h.proxy.ProxyStream(c.Request.Context(), c.Writer, c.Request, targetURL, headers)
-		if err != nil {
-			// 流式响应开始后无法返回 JSON 错误
-			return
-		}
-	} else {
-		c.Request.Body = io.NopCloser(strings.NewReader(string(newBody)))
-		err := h.proxy.ProxyRequest(c.Request.Context(), c.Writer, c.Request, targetURL, headers)
-		if err != nil {
-			if !c.Writer.Written() {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			}
-			return
-		}
-	}
-
-	// 异步记录统计
-	go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), true, "")
-}
-
-// doPassthrough 直接透传
-func (h *APIHandler) doPassthrough(c *gin.Context, profile *service.ProfileInstance, path string) {
-	// 选择默认提供商
-	providers := profile.GetProviders()
-	if len(providers) == 0 {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no providers available"})
-		return
-	}
-
-	provider := providers[0]
-	targetURL := provider.BaseURL + path
-
-	// 这里需要获取适配器的 headers，但适配器未初始化
-	// 使用基本 headers
-	headers := map[string]string{
-		"Authorization": "Bearer " + provider.APIKey,
-	}
-
-	err := h.proxy.ProxyRequest(c.Request.Context(), c.Writer, c.Request, targetURL, headers)
-	if err != nil {
-		if !c.Writer.Written() {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-	}
-}
-
-// handleChatCompletionWithTransform 带格式转换的聊天完成
-func (h *APIHandler) handleChatCompletionWithTransform(c *gin.Context, profile *service.ProfileInstance, requestID string, start time.Time) {
-	var req model.ChatCompletionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
 	// 路由
-	routeResult, err := profile.Route(c.Request.Context(), req.Model)
+	routeResult, err := profile.Route(c.Context(), req.Model)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// 执行请求
 	var result *model.ChatCompletionResponse
-	var stream <-chan *model.ChatCompletionStreamResponse
-	var reqErr error
+	var streamErr error
 
 	if req.Stream {
-		stream, reqErr = routeResult.Adapter.ChatCompletionStream(c.Request.Context(), &req)
-	} else {
-		result, reqErr = routeResult.Adapter.ChatCompletion(c.Request.Context(), &req)
+		// 流式处理
+		c.Response().Header.SetContentType("text/event-stream")
+		c.Response().Header.Set("Cache-Control", "no-cache")
+		c.Response().Header.Set("Connection", "keep-alive")
+
+		stream, chErr := routeResult.Adapter.ChatCompletionStream(c.Context(), &req)
+		if chErr != nil {
+			go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, chErr.Error())
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": chErr.Error()})
+		}
+
+		for resp := range stream {
+			data, _ := json.Marshal(resp)
+			c.Write([]byte("data: "))
+			c.Write(data)
+			c.Write([]byte("\n\n"))
+		}
+		c.Write([]byte("data: [DONE]\n\n"))
+		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), true, "")
+		return nil
 	}
 
-	if reqErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": reqErr.Error()})
-		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, reqErr.Error())
-		return
-	}
-
-	// 响应
-	if req.Stream {
-		h.streamResponse(c, stream, routeResult.Model.Name)
-	} else {
-		c.JSON(http.StatusOK, result)
+	result, streamErr = routeResult.Adapter.ChatCompletion(c.Context(), &req)
+	if streamErr != nil {
+		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, streamErr.Error())
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": streamErr.Error()})
 	}
 
 	go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), true, "")
-}
-
-// streamResponse 流式响应
-func (h *APIHandler) streamResponse(c *gin.Context, stream <-chan *model.ChatCompletionStreamResponse, modelName string) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming not supported"})
-		return
-	}
-
-	for resp := range stream {
-		data, _ := json.Marshal(resp)
-		c.Writer.Write([]byte("data: "))
-		c.Writer.Write(data)
-		c.Writer.Write([]byte("\n\n"))
-		flusher.Flush()
-	}
-
-	c.Writer.Write([]byte("data: [DONE]\n\n"))
-	flusher.Flush()
+	return c.JSON(result)
 }
 
 // handleEmbeddings 处理嵌入请求
-func (h *APIHandler) handleEmbeddings(c *gin.Context) {
-	profilePath := c.Param("profile")
-	h.processEmbeddings(c, profilePath)
+func (h *APIHandler) handleEmbeddings(c *fiber.Ctx) error {
+	profilePath := c.Params("profile")
+	return h.processEmbeddings(c, profilePath)
 }
 
 // handleDefaultEmbeddings 处理默认 Profile 的嵌入
-func (h *APIHandler) handleDefaultEmbeddings(c *gin.Context) {
-	h.processEmbeddings(c, "")
+func (h *APIHandler) handleDefaultEmbeddings(c *fiber.Ctx) error {
+	return h.processEmbeddings(c, "")
 }
 
 // processEmbeddings 处理嵌入
-func (h *APIHandler) processEmbeddings(c *gin.Context, profilePath string) {
+func (h *APIHandler) processEmbeddings(c *fiber.Ctx, profilePath string) error {
 	var req model.EmbeddingRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
 	profile := h.profileManager.GetProfile(profilePath)
 	if profile == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
 	}
 
-	routeResult, err := profile.Route(c.Request.Context(), req.Model)
+	routeResult, err := profile.Route(c.Context(), req.Model)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	result, err := routeResult.Adapter.Embeddings(c.Request.Context(), &req)
+	result, err := routeResult.Adapter.Embeddings(c.Context(), &req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	c.JSON(http.StatusOK, result)
+	return c.JSON(result)
 }
 
 // handleListModels 处理模型列表请求
-func (h *APIHandler) handleListModels(c *gin.Context) {
-	profilePath := c.Param("profile")
-	h.processListModels(c, profilePath)
+func (h *APIHandler) handleListModels(c *fiber.Ctx) error {
+	profilePath := c.Params("profile")
+	return h.processListModels(c, profilePath)
 }
 
 // handleDefaultListModels 处理默认 Profile 的模型列表
-func (h *APIHandler) handleDefaultListModels(c *gin.Context) {
-	h.processListModels(c, "")
+func (h *APIHandler) handleDefaultListModels(c *fiber.Ctx) error {
+	return h.processListModels(c, "")
 }
 
 // processListModels 处理模型列表
-func (h *APIHandler) processListModels(c *gin.Context, profilePath string) {
+func (h *APIHandler) processListModels(c *fiber.Ctx, profilePath string) error {
 	profile := h.profileManager.GetProfile(profilePath)
 	if profile == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
 	}
 
 	models := profile.GetModels()
@@ -334,55 +195,50 @@ func (h *APIHandler) processListModels(c *gin.Context, profilePath string) {
 		})
 	}
 
-	c.JSON(http.StatusOK, model.ListModelsResponse{
+	return c.JSON(model.ListModelsResponse{
 		Object: "list",
 		Data:   modelInfos,
 	})
 }
 
 // handleClaudeMessages 处理 Claude 格式消息
-func (h *APIHandler) handleClaudeMessages(c *gin.Context) {
-	profilePath := c.Param("profile")
+func (h *APIHandler) handleClaudeMessages(c *fiber.Ctx) error {
+	profilePath := c.Params("profile")
 
 	profile := h.profileManager.GetProfile(profilePath)
 	if profile == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
-		return
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
 	}
 
 	// 读取 Claude 格式请求并转换为 OpenAI 格式
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
-		return
+	body := c.Body()
+	if len(body) == 0 {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "empty request body"})
 	}
 
 	var claudeReq claudeRequest
 	if err := json.Unmarshal(body, &claudeReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
 	// 转换为 OpenAI 格式
 	openAIReq := convertClaudeToOpenAI(&claudeReq)
 
 	// 路由
-	routeResult, err := profile.Route(c.Request.Context(), openAIReq.Model)
+	routeResult, err := profile.Route(c.Context(), openAIReq.Model)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// 执行请求
-	result, err := routeResult.Adapter.ChatCompletion(c.Request.Context(), openAIReq)
+	result, err := routeResult.Adapter.ChatCompletion(c.Context(), openAIReq)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// 转换回 Claude 格式
 	claudeResp := convertOpenAIToClaude(result)
-	c.JSON(http.StatusOK, claudeResp)
+	return c.JSON(claudeResp)
 }
 
 // recordRequestLog 记录请求日志
@@ -510,4 +366,34 @@ func convertOpenAIToClaude(resp *model.ChatCompletionResponse) *claudeResponse {
 			OutputTokens: resp.Usage.CompletionTokens,
 		},
 	}
+}
+
+// 兼容函数：透传到上游服务
+func (h *APIHandler) proxyToUpstream(c *fiber.Ctx, targetURL string, body []byte) error {
+	req, err := http.NewRequestWithContext(c.Context(), "POST", targetURL, strings.NewReader(string(body)))
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	req.Header = make(http.Header)
+	c.Request().Header.VisitAll(func(key, value []byte) {
+		req.Header.Add(string(key), string(value))
+	})
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return c.Status(http.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer resp.Body.Close()
+
+	for k, v := range resp.Header {
+		for _, vv := range v {
+			c.Response().Header.Add(k, vv)
+		}
+	}
+	c.Response().SetStatusCode(resp.StatusCode)
+
+	io.Copy(c.Response().BodyWriter(), resp.Body)
+	return nil
 }
