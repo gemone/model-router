@@ -1,0 +1,41 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+model-router
+
+# Test
+*.test
+*.out
+
+# Go
+vendor/
+go.sum
+
+# Database
+*.db
+*.db-journal
+
+# Web
+web/node_modules/
+web/dist/
+web/.vite/
+web/*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Logs
+logs/
+*.log
