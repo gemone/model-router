@@ -45,15 +45,19 @@ func TestNewProfileRouter(t *testing.T) {
 func TestProfileRouter_SelectByPriority(t *testing.T) {
 	router := NewProfileRouter()
 
+	// In the new architecture, Profile doesn't have Priority.
+	// Priority is configured at Route level.
+	// selectByPriority returns the first enabled profile.
 	profiles := []*Profile{
-		{Profile: &model.Profile{ID: "p1", Priority: 10}},
-		{Profile: &model.Profile{ID: "p2", Priority: 50}},
-		{Profile: &model.Profile{ID: "p3", Priority: 30}},
+		{Profile: &model.Profile{ID: "p1", Enabled: true}},
+		{Profile: &model.Profile{ID: "p2", Enabled: true}},
+		{Profile: &model.Profile{ID: "p3", Enabled: true}},
 	}
 
 	result := router.selectByPriority(profiles)
 	assert.NotNil(t, result)
-	assert.Equal(t, "p2", result.Profile.ID)
+	// Should return first enabled profile
+	assert.Equal(t, "p1", result.Profile.ID)
 }
 
 func TestProfileRouter_ReloadCache(t *testing.T) {

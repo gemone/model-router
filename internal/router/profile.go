@@ -31,6 +31,7 @@ type Profile struct {
 	*model.Profile
 	providers    map[string]*model.Provider // providerID -> Provider
 	models       map[string][]*model.Model  // modelName -> Models
+	routes       map[string]*service.RouteInstance // routeID -> Route (NEW: route-based access)
 	adapterMap   map[string]adapter.Adapter // providerID -> Adapter
 	lastLoadTime time.Time
 }
@@ -122,6 +123,17 @@ func (r *ProfileRouter) LoadProfiles() error {
 			}
 		}
 
+		// Load routes via RouteIDs (NEW: route-based access with weight and priority)
+		if len(p.RouteIDs) > 0 {
+			profile.routes = make(map[string]*service.RouteInstance)
+			routeService := service.GetRouteService()
+			for _, routeID := range p.RouteIDs {
+				if route := routeService.GetRoute(routeID); route != nil {
+					profile.routes[routeID] = route
+				}
+			}
+		}
+
 		r.profiles[p.ID] = profile
 	}
 
@@ -191,15 +203,16 @@ func (r *ProfileRouter) matchesAnyPattern(p *Profile, modelName string) bool {
 	return ok
 }
 
-// selectByPriority selects the profile with highest priority.
+// selectByPriority selects the first available profile.
+// In the new architecture, Profile doesn't have priority - it's an API entry point.
 func (r *ProfileRouter) selectByPriority(profiles []*Profile) *Profile {
-	var best *Profile
+	// Return the first available profile
 	for _, p := range profiles {
-		if best == nil || p.Profile.Priority > best.Profile.Priority {
-			best = p
+		if p.Profile != nil && p.Profile.Enabled {
+			return p
 		}
 	}
-	return best
+	return nil
 }
 
 // Route determines the best provider and model for a given request.
@@ -209,7 +222,7 @@ func (r *ProfileRouter) Route(ctx context.Context, modelName string) (*RouteResu
 		return nil, err
 	}
 
-	// Direct model lookup
+	// 1. Direct model lookup (via ModelIDs)
 	if models, ok := profile.models[modelName]; ok && len(models) > 0 {
 		selected := r.selectBestModel(profile, models)
 		if selected != nil {
@@ -217,17 +230,59 @@ func (r *ProfileRouter) Route(ctx context.Context, modelName string) (*RouteResu
 			adapt := profile.adapterMap[selected.ProviderID]
 			if provider != nil && adapt != nil && provider.Enabled {
 				return &RouteResult{
-					Provider: provider,
-					Model:    selected,
-					Adapter:  adapt,
-					Profile:  profile.Profile,
+					Provider:   provider,
+					Model:      selected,
+					Adapter:    adapt,
+					Profile:    profile.Profile,
 					IsFallback: false,
 				}, nil
 			}
 		}
 	}
 
+	// 2. Route-based model lookup (via RouteIDs, using weight and priority)
+	if len(profile.routes) > 0 {
+		result, err := r.routeViaRoutes(ctx, profile, modelName)
+		if err == nil && result != nil {
+			return result, nil
+		}
+	}
+
 	return nil, fmt.Errorf("no available route for model: %s", modelName)
+}
+
+// routeViaRoutes attempts to find a model through configured routes
+func (r *ProfileRouter) routeViaRoutes(ctx context.Context, profile *Profile, modelName string) (*RouteResult, error) {
+	routeService := service.GetRouteService()
+
+	for routeID, routeInstance := range profile.routes {
+		// Check if this route contains the requested model
+		for _, entry := range routeInstance.ModelEntries {
+			if entry.Enabled && entry.Model != nil && entry.Model.Name == modelName {
+				// Use route's strategy to select the best model
+				selectedEntry, err := routeService.SelectModelFromRoute(ctx, routeID)
+				if err != nil {
+					continue
+				}
+
+				if selectedEntry != nil && selectedEntry.Model != nil {
+					provider := profile.providers[selectedEntry.Model.ProviderID]
+					adapt := profile.adapterMap[selectedEntry.Model.ProviderID]
+					if provider != nil && adapt != nil && provider.Enabled {
+						return &RouteResult{
+							Provider:   provider,
+							Model:      selectedEntry.Model,
+							Adapter:    adapt,
+							Profile:    profile.Profile,
+							IsFallback: false,
+						}, nil
+					}
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("model %s not found in any route", modelName)
 }
 
 // selectBestModel selects the best model from a list based on priority and health.
@@ -239,22 +294,21 @@ func (r *ProfileRouter) selectBestModel(profile *Profile, models []*model.Model)
 		return models[0]
 	}
 
+		// In the new architecture, priority is configured at Route level.
+	// For direct model selection, use health score only.
 	var best *model.Model
-	bestPriority := -1
 	bestHealthScore := -1.0
 
 	for _, m := range models {
 		provider := profile.providers[m.ProviderID]
-		if provider == nil {
+		if provider == nil || !provider.Enabled {
 			continue
 		}
 
 		healthScore := r.getHealthScore(m.ProviderID, m.Name)
 
-		if provider.Priority > bestPriority ||
-			(provider.Priority == bestPriority && healthScore > bestHealthScore) {
+		if healthScore > bestHealthScore {
 			best = m
-			bestPriority = provider.Priority
 			bestHealthScore = healthScore
 		}
 	}
@@ -323,14 +377,31 @@ func (r *ProfileRouter) shouldFallback(providerID, modelName string, lastError e
 
 	currentRPM := r.stats.GetCurrentRPM(providerID, modelName)
 	r.RLock()
-	provider := r.getProviderByID(providerID)
+	// Check model-level rate limit first
+	rateLimit := r.getModelRateLimit(providerID, modelName)
 	r.RUnlock()
 
-	if provider != nil && provider.RateLimit > 0 && currentRPM >= int64(provider.RateLimit) {
+	if rateLimit > 0 && currentRPM >= int64(rateLimit) {
 		return true
 	}
 
 	return false
+}
+
+// getModelRateLimit gets the rate limit for a specific model.
+// Returns the model's rate_limit if set (> 0), otherwise returns 0 (no limit).
+func (r *ProfileRouter) getModelRateLimit(providerID, modelName string) int {
+	// Find the model in all profiles
+	for _, p := range r.profiles {
+		if models, ok := p.models[modelName]; ok {
+			for _, m := range models {
+				if m.ProviderID == providerID && m.RateLimit > 0 {
+					return m.RateLimit
+				}
+			}
+		}
+	}
+	return 0
 }
 
 // tryFallback attempts to find a fallback route.

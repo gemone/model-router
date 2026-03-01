@@ -30,6 +30,7 @@ type ProfileInstance struct {
 	adapters             map[string]adapter.Adapter // providerID -> adapter
 	providerMap          map[string]*model.Provider // providerID -> provider
 	modelMap             map[string][]*model.Model  // modelName -> models
+	routeMap             map[string]*RouteInstance  // routeID -> route (NEW: route-based access)
 	stats                *StatsCollector
 	// DEPRECATED: Use compressionService instead (kept for backward compatibility during v3 refactoring)
 	compressionPipeline  *compressionpkg.CompressionPipeline
@@ -93,11 +94,10 @@ func (pm *ProfileManager) loadFromDB_unlocked() error {
 	// 如果没有 Profile，创建默认 Profile
 	if len(profiles) == 0 {
 		defaultProfile := &model.Profile{
-			ID:       "default",
-			Name:     "Default",
-			Path:     "default",
-			Enabled:  true,
-			Priority: 0,
+			ID:      "default",
+			Name:    "Default",
+			Path:    "default",
+			Enabled: true,
 		}
 		db.Create(defaultProfile)
 		profiles = append(profiles, *defaultProfile)
@@ -118,16 +118,32 @@ func (pm *ProfileManager) loadFromDB_unlocked() error {
 			instance.initCompression()
 			pm.profiles[p.Path] = instance
 
-			// 记录默认 Profile（优先级最高的）
+			// 设置默认 Profile（第一个启用的 Profile）
 			if pm.defaultProfile == "" {
-				pm.defaultProfile = p.Path
-			} else if existingInstance, ok := pm.profiles[pm.defaultProfile]; ok && p.Priority > existingInstance.Profile.Priority {
 				pm.defaultProfile = p.Path
 			}
 		}
 	}
 
 	return nil
+}
+
+// isValidUUID 检查字符串是否是有效的 UUID 格式
+func isValidUUID(s string) bool {
+	// UUID 格式: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	// 简单检查：长度为36，包含4个连字符
+	if len(s) != 36 {
+		return false
+	}
+	parts := strings.Split(s, "-")
+	if len(parts) != 5 {
+		return false
+	}
+	// 检查各部分长度
+	if len(parts[0]) != 8 || len(parts[1]) != 4 || len(parts[2]) != 4 || len(parts[3]) != 4 || len(parts[4]) != 12 {
+		return false
+	}
+	return true
 }
 
 // loadData 加载 Profile 数据
@@ -150,15 +166,37 @@ func (pi *ProfileInstance) loadData() error {
 		}
 	}
 
-	// 根据 Profile.ModelIDs 加载模型
+	// 根据 Profile.ModelIDs 加载模型 (直接访问)
+	// ModelIDs 可以是模型 ID (UUID) 或模型名称
 	if len(pi.Profile.ModelIDs) > 0 {
-		var models []model.Model
-		db.Where("id IN ?", pi.Profile.ModelIDs).Find(&models)
+		for _, modelID := range pi.Profile.ModelIDs {
+			var models []model.Model
 
-		for j := range models {
-			m := &models[j]
-			if m.Enabled {
+			// 先尝试按 ID 查找（如果看起来像 UUID）
+			if isValidUUID(modelID) {
+				db.Where("id = ?", modelID).Find(&models)
+			}
+
+			// 如果按 ID 没找到，按名称查找
+			if len(models) == 0 {
+				db.Where("name = ? AND enabled = ?", modelID, true).Find(&models)
+			}
+
+			for j := range models {
+				m := &models[j]
 				pi.modelMap[m.Name] = append(pi.modelMap[m.Name], m)
+			}
+		}
+	}
+
+	// 根据 Profile.RouteIDs 加载路由 (通过路由访问)
+	// RouteIDs 是路由 ID 列表，路由包含带权重和优先级的模型配置
+	if len(pi.Profile.RouteIDs) > 0 {
+		pi.routeMap = make(map[string]*RouteInstance)
+		routeService := GetRouteService()
+		for _, routeID := range pi.Profile.RouteIDs {
+			if route := routeService.GetRoute(routeID); route != nil {
+				pi.routeMap[routeID] = route
 			}
 		}
 	}
@@ -471,8 +509,8 @@ func (pm *ProfileManager) loadProfile_unlocked(p *model.Profile) error {
 
 	pm.profiles[p.Path] = instance
 
-	// 更新默认 Profile
-	if pm.defaultProfile == "" || p.Priority > pm.profiles[pm.defaultProfile].Profile.Priority {
+	// 如果没有默认 Profile，设置为当前 Profile
+	if pm.defaultProfile == "" {
 		pm.defaultProfile = p.Path
 	}
 
@@ -554,7 +592,7 @@ func (pi *ProfileInstance) Route(ctx context.Context, modelName string) (*RouteR
 		}
 	}
 
-	// 2. 直接查找模型
+	// 2. 直接查找模型 (通过 ModelIDs)
 	if models, ok := pi.modelMap[modelName]; ok {
 		selected := pi.selectBestModel(models)
 		if selected != nil {
@@ -571,7 +609,48 @@ func (pi *ProfileInstance) Route(ctx context.Context, modelName string) (*RouteR
 		}
 	}
 
+	// 3. 通过路由查找模型 (通过 RouteIDs，使用权重和优先级)
+	if len(pi.routeMap) > 0 {
+		result, err := pi.routeViaRoutes(ctx, modelName)
+		if err == nil && result != nil {
+			return result, nil
+		}
+	}
+
 	return nil, fmt.Errorf("no available provider for model: %s in profile: %s", modelName, pi.Profile.Path)
+}
+
+// routeViaRoutes 通过路由查找模型 (使用路由的权重和优先级策略)
+func (pi *ProfileInstance) routeViaRoutes(ctx context.Context, modelName string) (*RouteResult, error) {
+	routeService := GetRouteService()
+
+	for routeID, routeInstance := range pi.routeMap {
+		// 检查路由中是否有匹配的模型
+		for _, entry := range routeInstance.ModelEntries {
+			if entry.Enabled && entry.Model != nil && entry.Model.Name == modelName {
+				// 使用路由的策略选择最佳模型
+				selectedEntry, err := routeService.SelectModelFromRoute(ctx, routeID)
+				if err != nil {
+					continue
+				}
+
+				if selectedEntry != nil && selectedEntry.Model != nil {
+					provider, adapter := pi.getProviderAndAdapter(selectedEntry.Model.ProviderID)
+					if provider != nil && adapter != nil && provider.Enabled {
+						return &RouteResult{
+							Adapter:      adapter,
+							Model:        selectedEntry.Model,
+							Provider:     provider,
+							Profile:      pi.Profile,
+							FallbackUsed: false,
+						}, nil
+					}
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("model %s not found in any route", modelName)
 }
 
 // RouteWithFallback 带降级策略的路由
@@ -601,21 +680,13 @@ func (pi *ProfileInstance) selectBestModel(models []*model.Model) *model.Model {
 	}
 
 	var best *model.Model
-	bestPriority := -1
 	bestHealthScore := -1.0
 
 	for _, m := range models {
-		provider := pi.providerMap[m.ProviderID]
-		if provider == nil {
-			continue
-		}
-
 		healthScore := pi.stats.GetHealthScore(m.ProviderID, m.Name)
 
-		if provider.Priority > bestPriority ||
-			(provider.Priority == bestPriority && healthScore > bestHealthScore) {
+		if healthScore > bestHealthScore {
 			best = m
-			bestPriority = provider.Priority
 			bestHealthScore = healthScore
 		}
 	}
@@ -663,12 +734,31 @@ func (pi *ProfileInstance) shouldFallback(providerID, modelName string) bool {
 	}
 
 	currentRPM := pi.stats.GetCurrentRPM(providerID, modelName)
-	provider := pi.providerMap[providerID]
-	if provider != nil && provider.RateLimit > 0 && currentRPM >= int64(provider.RateLimit) {
+
+	// Check model-level rate limit first
+	rateLimit := pi.getModelRateLimit(providerID, modelName)
+	if rateLimit > 0 && currentRPM >= int64(rateLimit) {
 		return true
 	}
 
 	return false
+}
+
+// getModelRateLimit 获取模型的速率限制
+// 返回模型的 rate_limit（如果 > 0），否则返回 0（无限制）
+func (pi *ProfileInstance) getModelRateLimit(providerID, modelName string) int {
+	pi.RLock()
+	defer pi.RUnlock()
+
+	// Find the model in modelMap
+	if models, ok := pi.modelMap[modelName]; ok {
+		for _, m := range models {
+			if m.ProviderID == providerID && m.RateLimit > 0 {
+				return m.RateLimit
+			}
+		}
+	}
+	return 0
 }
 
 // getProviderAndAdapter 获取供应商和适配器
