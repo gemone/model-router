@@ -49,18 +49,19 @@
                         <div class="card-header">
                             <span>{{ $t("dashboard.requestTrend") }}</span>
                             <el-radio-group v-model="timeRange" size="small">
-                                <el-radio-button label="24h"
+                                <el-radio-button value="24h"
                                     >24H</el-radio-button
                                 >
-                                <el-radio-button label="7d">7D</el-radio-button>
-                                <el-radio-button label="30d"
+                                <el-radio-button value="7d">7D</el-radio-button>
+                                <el-radio-button value="30d"
                                     >30D</el-radio-button
                                 >
                             </el-radio-group>
                         </div>
                     </template>
                     <div class="chart-container">
-                        <v-chart :option="trendChartOption" autoresize />
+                        <v-chart v-if="hasTrendData" :option="trendChartOption" autoresize />
+                        <el-empty v-else :description="$t('dashboard.noTrendData')" />
                     </div>
                 </el-card>
             </el-col>
@@ -73,7 +74,8 @@
                         </div>
                     </template>
                     <div class="chart-container">
-                        <v-chart :option="pieChartOption" autoresize />
+                        <v-chart v-if="hasTopModelsData" :option="pieChartOption" autoresize />
+                        <el-empty v-else :description="$t('dashboard.noTopModelsData')" />
                     </div>
                 </el-card>
             </el-col>
@@ -182,6 +184,19 @@ const store = useAppStore();
 
 const timeRange = ref("24h");
 
+// 判断是否有趋势数据
+const hasTrendData = computed(() => {
+    const s = store.stats;
+    return s.total_requests_24h > 0;
+});
+
+// 判断是否热门模型数据
+const hasTopModelsData = computed(() => {
+    const s = store.stats;
+    const topModels = s.top_models || {};
+    return Object.keys(topModels).length > 0;
+});
+
 // 从 store 获取真实统计数据
 const statsCards = computed(() => {
     const s = store.stats;
@@ -194,9 +209,9 @@ const statsCards = computed(() => {
             color: "#409EFF",
         },
         {
-            key: "today",
+            key: "lastHour",
             value: (s.requests_last_hour || 0).toLocaleString(),
-            label: t("dashboard.todayRequests"),
+            label: t("dashboard.lastHourRequests"),
             icon: "TrendCharts",
             color: "#67C23A",
         },
@@ -220,13 +235,17 @@ const statsCards = computed(() => {
 // 趋势图 - 使用真实数据
 const trendChartOption = computed(() => {
     const s = store.stats;
-    const topModels = s.top_models || {};
-    const labels = Object.keys(topModels);
-    const data = Object.values(topModels);
+    const trend = store.trendStats;
+    const hasData = s.total_requests_24h > 0;
+    
+    // 使用后端返回的趋势数据
+    const hours = trend.hours || [];
+    const data = trend.requests || [];
 
     return {
         tooltip: {
             trigger: "axis",
+            formatter: hasData ? undefined : () => t('dashboard.noData'),
         },
         grid: {
             left: "3%",
@@ -237,7 +256,7 @@ const trendChartOption = computed(() => {
         xAxis: {
             type: "category",
             boundaryGap: false,
-            data: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "23:59"],
+            data: hours,
             axisLine: {
                 lineStyle: {
                     color: "#e5e7eb",
@@ -249,6 +268,7 @@ const trendChartOption = computed(() => {
         },
         yAxis: {
             type: "value",
+            minInterval: 1,
             axisLine: {
                 show: false,
             },
@@ -266,12 +286,12 @@ const trendChartOption = computed(() => {
         },
         series: [
             {
-                name: "Requests",
+                name: t('dashboard.requests'),
                 type: "line",
                 smooth: true,
                 symbol: "circle",
                 symbolSize: 6,
-                data: [120, 82, 191, 334, 290, 330, 310],
+                data: data,
                 areaStyle: {
                     color: {
                         type: "linear",
@@ -296,95 +316,72 @@ const trendChartOption = computed(() => {
     };
 });
 
-// 饼图配置
-const pieChartOption = computed(() => ({
-    tooltip: {
-        trigger: "item",
-        formatter: "{b}: {c} ({d}%)",
-    },
-    legend: {
-        orient: "vertical",
-        right: "5%",
-        top: "center",
-        textStyle: {
-            color: "#6b7280",
-        },
-    },
-    series: [
-        {
-            type: "pie",
-            radius: ["45%", "70%"],
-            center: ["35%", "50%"],
-            avoidLabelOverlap: false,
-            itemStyle: {
-                borderRadius: 8,
-                borderColor: "#fff",
-                borderWidth: 2,
-            },
-            label: {
-                show: false,
-            },
-            emphasis: {
-                label: {
-                    show: true,
-                    fontSize: 14,
-                    fontWeight: "bold",
-                },
-            },
-            data: [
-                { value: 335, name: "GPT-4", itemStyle: { color: "#3B82F6" } },
-                { value: 310, name: "GPT-3.5", itemStyle: { color: "#10B981" } },
-                { value: 234, name: "Claude", itemStyle: { color: "#8B5CF6" } },
-                { value: 135, name: "Gemini", itemStyle: { color: "#F59E0B" } },
-                { value: 148, name: "Others", itemStyle: { color: "#6B7280" } },
-            ],
-        },
-    ],
-}));
+// 饼图配置 - 使用真实数据
+const pieChartOption = computed(() => {
+    const s = store.stats;
+    const topModels = s.top_models || {};
+    const hasData = Object.keys(topModels).length > 0;
+    
+    // 如果有真实数据，使用真实数据；否则显示空状态
+    const data = hasData 
+        ? Object.entries(topModels).map(([name, value], index) => ({
+            value,
+            name,
+            itemStyle: { color: getColorByIndex(index) },
+        }))
+        : [];
 
-// 最近日志
-const recentLogs = ref([
-    {
-        request_id: "req-001",
-        model: "gpt-4",
-        provider_id: "openai",
-        status: "success",
-        latency: 234,
-        created_at: new Date().toISOString(),
-    },
-    {
-        request_id: "req-002",
-        model: "claude-3",
-        provider_id: "anthropic",
-        status: "success",
-        latency: 189,
-        created_at: new Date().toISOString(),
-    },
-    {
-        request_id: "req-003",
-        model: "deepseek-chat",
-        provider_id: "deepseek",
-        status: "error",
-        latency: 5000,
-        created_at: new Date().toISOString(),
-    },
-    {
-        request_id: "req-004",
-        model: "gpt-4o",
-        provider_id: "openai",
-        status: "success",
-        latency: 312,
-        created_at: new Date().toISOString(),
-    },
-    {
-        request_id: "req-005",
-        model: "claude-3-opus",
-        provider_id: "anthropic",
-        status: "success",
-        latency: 456,
-        created_at: new Date().toISOString(),
-    },
-]);
+    return {
+        tooltip: {
+            trigger: "item",
+            formatter: "{b}: {c} ({d}%)",
+        },
+        legend: {
+            orient: "vertical",
+            right: "5%",
+            top: "center",
+            textStyle: {
+                color: "#6b7280",
+            },
+            data: hasData ? Object.keys(topModels) : [],
+        },
+        series: [
+            {
+                type: "pie",
+                radius: ["45%", "70%"],
+                center: ["35%", "50%"],
+                avoidLabelOverlap: false,
+                itemStyle: {
+                    borderRadius: 8,
+                    borderColor: "#fff",
+                    borderWidth: 2,
+                },
+                label: {
+                    show: false,
+                },
+                emphasis: {
+                    label: {
+                        show: true,
+                        fontSize: 14,
+                        fontWeight: "bold",
+                    },
+                },
+                data: data,
+            },
+        ],
+    };
+});
+
+// 颜色列表
+const colors = ["#3B82F6", "#10B981", "#8B5CF6", "#F59E0B", "#6B7280", "#EC4899", "#14B8A6", "#F97316"];
+function getColorByIndex(index) {
+    return colors[index % colors.length];
+}
+
+// 最近日志 - 从 store 获取真实数据
+const recentLogs = computed(() => {
+    return store.logs.slice(0, 5) || []
+})
 
 function formatTime(time) {
     return new Date(time).toLocaleString();
@@ -397,6 +394,7 @@ function goToLogs() {
 onMounted(() => {
     // 加载真实数据
     store.fetchStats();
+    store.fetchTrendStats();
 });
 </script>
 

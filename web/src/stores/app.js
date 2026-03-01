@@ -9,6 +9,15 @@ export const useAppStore = defineStore('app', () => {
   const models = ref([])
   const routeRules = ref([])
   const stats = ref({})
+  const trendStats = ref({
+    hours: [],
+    requests: [],
+    tokens: []
+  })
+  const providerModelStats = ref({
+    providers: [],
+    models: []
+  })
   const logs = ref([])
   const loading = ref(false)
   const sidebarCollapsed = ref(false)
@@ -72,16 +81,39 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function fetchTrendStats() {
+    try {
+      const { data } = await axios.get('/api/admin/stats/trend')
+      trendStats.value = data
+    } catch (e) {
+      console.error('Failed to fetch trend stats:', e)
+    }
+  }
+
+  async function fetchProviderModelStats() {
+    try {
+      const { data } = await axios.get('/api/admin/stats/all')
+      providerModelStats.value = data
+    } catch (e) {
+      console.error('Failed to fetch provider/model stats:', e)
+    }
+  }
+
   async function fetchLogs(page = 1, pageSize = 50) {
     loading.value = true
     try {
       const { data } = await axios.get('/api/admin/logs', {
         params: { page, pageSize }
       })
-      logs.value = data
+      logs.value = data.logs || []
     } finally {
       loading.value = false
     }
+  }
+
+  async function clearLogs() {
+    await axios.delete('/api/admin/logs')
+    logs.value = []
   }
 
   async function createProfile(profile) {
@@ -160,6 +192,22 @@ export const useAppStore = defineStore('app', () => {
     await fetchRouteRules()
   }
 
+  async function testProvider(providerId) {
+    try {
+      // 确保模型数据已加载
+      await fetchModels()
+      // 获取该 provider 下的第一个可用模型
+      const providerModels = models.value.filter(m => m.provider_id === providerId && m.enabled)
+      if (providerModels.length === 0) {
+        throw new Error('No enabled models found for this provider')
+      }
+      const modelName = providerModels[0].name
+      return await testModel(providerId, modelName)
+    } catch (e) {
+      throw e
+    }
+  }
+
   async function fetchSettings() {
     try {
       const { data } = await axios.get('/api/admin/settings')
@@ -191,6 +239,8 @@ export const useAppStore = defineStore('app', () => {
     models,
     routeRules,
     stats,
+    trendStats,
+    providerModelStats,
     logs,
     loading,
     sidebarCollapsed,
@@ -203,7 +253,10 @@ export const useAppStore = defineStore('app', () => {
     fetchModels,
     fetchRouteRules,
     fetchStats,
+    fetchTrendStats,
+    fetchProviderModelStats,
     fetchLogs,
+    clearLogs,
     createProfile,
     updateProfile,
     deleteProfile,
@@ -214,6 +267,7 @@ export const useAppStore = defineStore('app', () => {
     updateModel,
     deleteModel,
     testModel,
+    testProvider,
     createRouteRule,
     updateRouteRule,
     deleteRouteRule,

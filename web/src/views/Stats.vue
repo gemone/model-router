@@ -175,13 +175,13 @@ const store = useAppStore()
 const timeRange = ref('7d')
 const statsData = ref({})
 
-// 统计卡片
+// 统计卡片 - 使用 store.stats 的字段名
 const statCards = computed(() => {
-  const s = statsData.value
+  const s = store.stats
   return [
     {
       key: 'requests',
-      value: (s.total_requests || 0).toLocaleString(),
+      value: (s.total_requests_24h || 0).toLocaleString(),
       label: t('stats.requests'),
       icon: 'DataLine',
       color: '#409EFF',
@@ -195,14 +195,14 @@ const statCards = computed(() => {
     },
     {
       key: 'latency',
-      value: (s.avg_latency || 0).toFixed(0) + 'ms',
+      value: (s.avg_latency_ms || 0).toFixed(0) + 'ms',
       label: t('stats.latency'),
       icon: 'Timer',
       color: '#E6A23C',
     },
     {
       key: 'success',
-      value: ((s.success_rate || 0) * 100).toFixed(1) + '%',
+      value: (s.success_rate || 0).toFixed(1) + '%',
       label: t('dashboard.successRate'),
       icon: 'CircleCheck',
       color: '#F56C6C',
@@ -210,156 +210,188 @@ const statCards = computed(() => {
   ]
 })
 
-// 请求图表配置
-const requestChartOption = computed(() => ({
-  tooltip: { trigger: 'axis' },
-  grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-  xAxis: {
-    type: 'category',
-    data: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    axisLine: { lineStyle: { color: '#e5e7eb' } },
-    axisLabel: { color: '#6b7280' },
-  },
-  yAxis: {
-    type: 'value',
-    axisLine: { show: false },
-    axisTick: { show: false },
-    splitLine: { lineStyle: { color: '#f3f4f6' } },
-    axisLabel: { color: '#6b7280' },
-  },
-  series: [
-    {
-      name: t('stats.requests'),
-      type: 'line',
-      smooth: true,
-      data: [120, 200, 150, 80, 70, 110, 130],
-      areaStyle: {
-        color: {
-          type: 'linear',
-          x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
-            { offset: 1, color: 'rgba(64, 158, 255, 0.05)' },
-          ],
+// 请求图表配置 - 使用真实趋势数据
+const requestChartOption = computed(() => {
+  const trend = store.trendStats || {}
+  const hours = trend.hours || []
+  const requests = trend.requests || []
+  const hasData = requests.some(r => r > 0)
+  
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: hours.length > 0 ? hours : ['00:00', '06:00', '12:00', '18:00'],
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+      axisLabel: { color: '#6b7280' },
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: '#f3f4f6' } },
+      axisLabel: { color: '#6b7280' },
+    },
+    series: [
+      {
+        name: t('stats.requests'),
+        type: 'line',
+        smooth: true,
+        data: hasData ? requests : [0, 0, 0, 0],
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
+              { offset: 1, color: 'rgba(64, 158, 255, 0.05)' },
+            ],
+          },
+        },
+        itemStyle: { color: '#409EFF' },
+        lineStyle: { width: 2 },
+      },
+    ],
+  }
+})
+
+// Token 图表配置 - 使用真实趋势数据
+const tokenChartOption = computed(() => {
+  const trend = store.trendStats || {}
+  const hours = trend.hours || []
+  const tokens = trend.tokens || []
+  const hasData = tokens.some(t => t > 0)
+  
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: hours.length > 0 ? hours : ['00:00', '06:00', '12:00', '18:00'],
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+      axisLabel: { color: '#6b7280' },
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: '#f3f4f6' } },
+      axisLabel: { color: '#6b7280' },
+    },
+    series: [
+      {
+        name: t('stats.tokens'),
+        type: 'bar',
+        data: hasData ? tokens : [0, 0, 0, 0],
+        itemStyle: {
+          color: {
+            type: 'linear',
+            x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: '#67C23A' },
+              { offset: 1, color: '#95d475' },
+            ],
+          },
+          borderRadius: [4, 4, 0, 0],
         },
       },
-      itemStyle: { color: '#409EFF' },
-      lineStyle: { width: 2 },
-    },
-  ],
-}))
+    ],
+  }
+})
 
-// Token 图表配置
-const tokenChartOption = computed(() => ({
-  tooltip: { trigger: 'axis' },
-  grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-  xAxis: {
-    type: 'category',
-    data: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    axisLine: { lineStyle: { color: '#e5e7eb' } },
-    axisLabel: { color: '#6b7280' },
-  },
-  yAxis: {
-    type: 'value',
-    axisLine: { show: false },
-    axisTick: { show: false },
-    splitLine: { lineStyle: { color: '#f3f4f6' } },
-    axisLabel: { color: '#6b7280' },
-  },
-  series: [
-    {
-      name: t('stats.tokens'),
-      type: 'bar',
-      data: [2340, 2100, 1800, 1500, 1200, 1600, 1900],
-      itemStyle: {
-        color: {
-          type: 'linear',
-          x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: '#67C23A' },
-            { offset: 1, color: '#95d475' },
-          ],
-        },
-        borderRadius: [4, 4, 0, 0],
+// 延迟图表配置 - 使用真实趋势数据
+const latencyChartOption = computed(() => {
+  const trend = store.trendStats || {}
+  const hours = trend.hours || []
+  const avgLatency = statsData.value.avg_latency_ms || 0
+  const hasData = hours.length > 0 && avgLatency > 0
+  
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: hours.length > 0 ? hours : ['00:00', '06:00', '12:00', '18:00'],
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+      axisLabel: { color: '#6b7280' },
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: '#f3f4f6' } },
+      axisLabel: { color: '#6b7280' },
+    },
+    series: [
+      {
+        name: t('stats.latency'),
+        type: 'line',
+        smooth: true,
+        data: hasData ? new Array(hours.length).fill(avgLatency) : [0, 0, 0, 0],
+        itemStyle: { color: '#E6A23C' },
+        lineStyle: { width: 2 },
       },
-    },
-  ],
-}))
+    ],
+  }
+})
 
-// 延迟图表配置
-const latencyChartOption = computed(() => ({
-  tooltip: { trigger: 'axis' },
-  grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-  xAxis: {
-    type: 'category',
-    data: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    axisLine: { lineStyle: { color: '#e5e7eb' } },
-    axisLabel: { color: '#6b7280' },
-  },
-  yAxis: {
-    type: 'value',
-    axisLine: { show: false },
-    axisTick: { show: false },
-    splitLine: { lineStyle: { color: '#f3f4f6' } },
-    axisLabel: { color: '#6b7280' },
-  },
-  series: [
-    {
-      name: t('stats.latency'),
-      type: 'line',
-      smooth: true,
-      data: [234, 210, 180, 250, 190, 200, 220],
-      itemStyle: { color: '#E6A23C' },
-      lineStyle: { width: 2 },
-    },
-  ],
-}))
+// 错误率图表配置 - 使用真实统计数据
+const errorRateChartOption = computed(() => {
+  const s = statsData.value
+  const successRate = s.success_rate || 0
+  const errorRate = 100 - successRate
+  
+  return {
+    tooltip: { trigger: 'item', formatter: '{b}: {c}%' },
+    legend: { orient: 'vertical', right: '5%', top: 'center' },
+    series: [
+      {
+        type: 'pie',
+        radius: ['45%', '70%'],
+        center: ['35%', '50%'],
+        data: [
+          { value: successRate, name: 'Success', itemStyle: { color: '#67C23A' } },
+          { value: errorRate > 0 ? errorRate : 0.1, name: 'Error', itemStyle: { color: '#F56C6C' } },
+        ],
+        label: { show: false },
+        emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+      },
+    ],
+  }
+})
 
-// 错误率图表配置
-const errorRateChartOption = computed(() => ({
-  tooltip: { trigger: 'item', formatter: '{b}: {c}%' },
-  legend: { orient: 'vertical', right: '5%', top: 'center' },
-  series: [
-    {
-      type: 'pie',
-      radius: ['45%', '70%'],
-      center: ['35%', '50%'],
-      data: [
-        { value: 95, name: 'Success', itemStyle: { color: '#67C23A' } },
-        { value: 5, name: 'Error', itemStyle: { color: '#F56C6C' } },
-      ],
-      label: { show: false },
-      emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
-    },
-  ],
-}))
-
-// 供应商统计数据
+// 供应商统计数据 - 使用后端返回的真实数据
 const providerStats = computed(() => {
-  const providers = store.providers || []
-  return providers.map(p => ({
-    name: p.name,
-    requests: Math.floor(Math.random() * 10000),
-    tokens: Math.floor(Math.random() * 1000000),
-    avg_latency: Math.random() * 500 + 100,
-    error_rate: Math.random() * 0.1,
+  const providerStatsData = store.providerModelStats?.providers || []
+  const providersMap = new Map((store.providers || []).map(p => [p.id, p.name]))
+
+  return providerStatsData.map(p => ({
+    name: providersMap.get(p.id) || p.name,
+    requests: p.requests || 0,
+    tokens: p.tokens || 0,
+    avg_latency: p.avg_latency || 0,
+    error_rate: p.error_rate || 0,
   }))
 })
 
-// 模型统计数据
+// 模型统计数据 - 使用后端返回的真实数据
 const modelStats = computed(() => {
-  const models = store.models || []
-  return models.map(m => ({
+  const modelStatsData = store.providerModelStats?.models || []
+
+  return modelStatsData.map(m => ({
     name: m.name,
-    requests: Math.floor(Math.random() * 5000),
-    tokens: Math.floor(Math.random() * 500000),
-    avg_latency: Math.random() * 400 + 150,
-    error_rate: Math.random() * 0.08,
+    requests: m.requests || 0,
+    tokens: m.tokens || 0,
+    avg_latency: m.avg_latency || 0,
+    error_rate: m.error_rate || 0,
   }))
 })
 
 async function fetchData() {
   await store.fetchStats()
+  await store.fetchTrendStats()
+  await store.fetchProviderModelStats()
   statsData.value = store.stats || {}
 }
 

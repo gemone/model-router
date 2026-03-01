@@ -53,6 +53,8 @@ func (h *AdminHandler) RegisterRoutes(r fiber.Router) {
 
 	// 统计数据
 	r.Get("/stats/dashboard", h.GetDashboardStats)
+	r.Get("/stats/trend", h.GetTrendStats)
+	r.Get("/stats/all", h.GetAllProviderModelStats)
 	r.Get("/stats/provider/:id", h.GetProviderStats)
 	r.Get("/stats/model/:name", h.GetModelStats)
 
@@ -117,14 +119,16 @@ func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
 
 	// Parse only the fields we want to update
 	var updates struct {
-		Name                *string `json:"name"`
-		Path                *string `json:"path"`
-		Description         *string `json:"description"`
-		Enabled             *bool   `json:"enabled"`
-		Priority            *int    `json:"priority"`
-		EnableCompression   *bool   `json:"enable_compression"`
-		CompressionStrategy *string `json:"compression_strategy"`
-		MaxContextWindow    *int    `json:"max_context_window"`
+		Name                *string  `json:"name"`
+		Path                *string  `json:"path"`
+		Description         *string  `json:"description"`
+		Enabled             *bool    `json:"enabled"`
+		Priority            *int     `json:"priority"`
+		EnableCompression   *bool    `json:"enable_compression"`
+		CompressionStrategy *string  `json:"compression_strategy"`
+		MaxContextWindow    *int     `json:"max_context_window"`
+		ModelIDs            []string `json:"model_ids"`
+		FallbackModels      []string `json:"fallback_models"`
 	}
 	if err := c.BodyParser(&updates); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -154,6 +158,12 @@ func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
 	}
 	if updates.MaxContextWindow != nil {
 		existingProfile.MaxContextWindow = *updates.MaxContextWindow
+	}
+	if updates.ModelIDs != nil {
+		existingProfile.ModelIDs = updates.ModelIDs
+	}
+	if updates.FallbackModels != nil {
+		existingProfile.FallbackModels = updates.FallbackModels
 	}
 
 	if err := h.profileManager.UpdateProfile(&existingProfile); err != nil {
@@ -523,6 +533,12 @@ func (h *AdminHandler) GetDashboardStats(c *fiber.Ctx) error {
 	return c.JSON(stats)
 }
 
+// GetTrendStats 获取趋势统计（最近24小时）
+func (h *AdminHandler) GetTrendStats(c *fiber.Ctx) error {
+	stats := h.stats.GetTrendStats()
+	return c.JSON(stats)
+}
+
 // GetProviderStats 获取 Provider 统计
 func (h *AdminHandler) GetProviderStats(c *fiber.Ctx) error {
 	id := c.Params("id")
@@ -534,6 +550,12 @@ func (h *AdminHandler) GetProviderStats(c *fiber.Ctx) error {
 func (h *AdminHandler) GetModelStats(c *fiber.Ctx) error {
 	name := c.Params("name")
 	stats := h.stats.GetModelStats(name)
+	return c.JSON(stats)
+}
+
+// GetAllProviderModelStats 获取所有供应商和模型的详细统计
+func (h *AdminHandler) GetAllProviderModelStats(c *fiber.Ctx) error {
+	stats := h.stats.GetAllProviderModelStats()
 	return c.JSON(stats)
 }
 
