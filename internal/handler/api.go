@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -43,9 +45,11 @@ func (h *APIHandler) RegisterRoutes(app *fiber.App) {
 	app.Post("/api/openai/:profile/v1/embeddings", h.handleEmbeddings)
 	app.Get("/api/openai/:profile/v1/models", h.handleListModels)
 
-	// Claude 格式
-	app.Post("/api/claude/:profile/v1/messages", h.handleClaudeMessages)
+	// Claude/Anthropic 格式 - 新路由支持 APIFormat 参数
+	app.Post("/api/claude/:profile/v1/messages", h.handleChatCompletionWithFormat)
+	app.Post("/api/anthropic/:profile/v1/messages", h.handleChatCompletionWithFormat)
 	app.Get("/api/claude/:profile/v1/models", h.handleListModels)
+	app.Get("/api/anthropic/:profile/v1/models", h.handleListModels)
 
 	// 简写格式
 	app.Post("/:profile/v1/chat/completions", h.handleChatCompletion)
@@ -86,10 +90,59 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	// 路由
+	// 先路由，获取目标模型
 	routeResult, err := profile.Route(c.Context(), req.Model)
 	if err != nil {
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Check if this is a composite model and validate streaming support
+	if compositeModel, ok := profile.GetCompositeModel(req.Model); ok && compositeModel.Enabled {
+		// Streaming is not supported for parallel-synthesize mode
+		if req.Stream && compositeModel.Strategy == model.CompositeStrategyParallel &&
+			compositeModel.Aggregation != nil && compositeModel.Aggregation.Method == model.AggregationMethodSynthesize {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": "streaming is not supported for composite models with parallel-synthesize aggregation",
+				"model": req.Model,
+				"strategy": string(compositeModel.Strategy),
+				"aggregation": string(compositeModel.Aggregation.Method),
+			})
+		}
+	}
+
+	// Validate compression group if provided
+	if req.CompressionModelGroup != nil && *req.CompressionModelGroup != "" {
+		if err := h.validateCompressionGroup(profile, *req.CompressionModelGroup); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error":   "invalid compression model group",
+				"details": err.Error(),
+				"hint":    "Valid groups can be queried via GET /api/admin/profiles/:id/compression-groups",
+			})
+		}
+	}
+
+	// 智能压缩决策
+	var compressionMetadata *model.CompressionMetadata
+	shouldCompress := h.shouldApplyCompression(profile.Profile, routeResult.Model, req.Messages)
+	if shouldCompress {
+		originalCount := len(req.Messages)
+		// Create session for compression (minimal required fields)
+		session := &model.Session{
+			ID:            requestID,
+			ContextWindow: profile.Profile.MaxContextWindow,
+		}
+		compressedMessages, metadata, err := profile.ApplyCompression(c.Context(), session, profile.Profile.MaxContextWindow, req.CompressionModelGroup)
+		if err != nil {
+			// Log compression error but continue with original messages
+			fmt.Printf("Compression error: %v\n", err)
+		} else {
+			req.Messages = compressedMessages
+			compressionMetadata = metadata
+			if h.debug {
+				fmt.Printf("Compression applied: %d -> %d messages\n",
+					originalCount, len(compressedMessages))
+			}
+		}
 	}
 
 	// 执行请求
@@ -123,6 +176,11 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 	if streamErr != nil {
 		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, streamErr.Error())
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": streamErr.Error()})
+	}
+
+	// Include compression metadata if available
+	if compressionMetadata != nil {
+		result.Compression = compressionMetadata
 	}
 
 	go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), true, "")
@@ -201,44 +259,146 @@ func (h *APIHandler) processListModels(c *fiber.Ctx, profilePath string) error {
 	})
 }
 
-// handleClaudeMessages 处理 Claude 格式消息
-func (h *APIHandler) handleClaudeMessages(c *fiber.Ctx) error {
+// handleChatCompletionWithFormat 处理带格式参数的聊天完成请求
+// 支持 /api/claude/:profile/v1/messages 和 /api/anthropic/:profile/v1/messages
+func (h *APIHandler) handleChatCompletionWithFormat(c *fiber.Ctx) error {
+	// 从路径中提取格式类型
+	apiFormat := GetAPIFormatFromPath(c.Path())
 	profilePath := c.Params("profile")
 
+	// 对于 Anthropic/Claude 格式，需要转换请求
+	if apiFormat == APIFormatAnthropic || apiFormat == APIFormatClaude {
+		return h.processAnthropicRequest(c, profilePath)
+	}
+
+	// 默认使用 OpenAI 格式处理
+	return h.processChatCompletion(c, profilePath)
+}
+
+// handleClaudeMessages 处理 Claude 格式消息 (已弃用，保留向后兼容)
+func (h *APIHandler) handleClaudeMessages(c *fiber.Ctx) error {
+	return h.handleChatCompletionWithFormat(c)
+}
+
+// processAnthropicRequest 处理 Anthropic/Claude 格式请求
+func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) error {
+	requestID := uuid.New().String()
+	start := time.Now()
+
+	// 获取 Profile
 	profile := h.profileManager.GetProfile(profilePath)
 	if profile == nil {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
 	}
 
-	// 读取 Claude 格式请求并转换为 OpenAI 格式
+	// 读取 Anthropic 格式请求
 	body := c.Body()
 	if len(body) == 0 {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "empty request body"})
 	}
 
-	var claudeReq claudeRequest
-	if err := json.Unmarshal(body, &claudeReq); err != nil {
+	var anthropicReq AnthropicRequest
+	if err := json.Unmarshal(body, &anthropicReq); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
 	// 转换为 OpenAI 格式
-	openAIReq := convertClaudeToOpenAI(&claudeReq)
+	openAIReq := ConvertAnthropicToOpenAI(&anthropicReq)
 
-	// 路由
+	// 路由到目标模型
 	routeResult, err := profile.Route(c.Context(), openAIReq.Model)
 	if err != nil {
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	// 检查是否是复合模型并验证流式支持
+	if compositeModel, ok := profile.GetCompositeModel(openAIReq.Model); ok && compositeModel.Enabled {
+		if openAIReq.Stream && compositeModel.Strategy == model.CompositeStrategyParallel &&
+			compositeModel.Aggregation != nil && compositeModel.Aggregation.Method == model.AggregationMethodSynthesize {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": "streaming is not supported for composite models with parallel-synthesize aggregation",
+				"model": openAIReq.Model,
+			})
+		}
+	}
+
+	// 验证压缩组（如果提供）
+	if openAIReq.CompressionModelGroup != nil && *openAIReq.CompressionModelGroup != "" {
+		if err := h.validateCompressionGroup(profile, *openAIReq.CompressionModelGroup); err != nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error":   "invalid compression model group",
+				"details": err.Error(),
+			})
+		}
+	}
+
+	// 智能压缩决策
+	var compressionMetadata *model.CompressionMetadata
+	shouldCompress := h.shouldApplyCompression(profile.Profile, routeResult.Model, openAIReq.Messages)
+	if shouldCompress {
+		originalCount := len(openAIReq.Messages)
+		session := &model.Session{
+			ID:            requestID,
+			ContextWindow: profile.Profile.MaxContextWindow,
+		}
+		compressedMessages, metadata, err := profile.ApplyCompression(c.Context(), session, profile.Profile.MaxContextWindow, openAIReq.CompressionModelGroup)
+		if err != nil {
+			fmt.Printf("Compression error: %v\n", err)
+		} else {
+			openAIReq.Messages = compressedMessages
+			compressionMetadata = metadata
+			if h.debug {
+				fmt.Printf("Compression applied: %d -> %d messages\n", originalCount, len(compressedMessages))
+			}
+		}
+	}
+
 	// 执行请求
-	result, err := routeResult.Adapter.ChatCompletion(c.Context(), openAIReq)
+	var result *model.ChatCompletionResponse
+
+	if openAIReq.Stream {
+		// 流式处理 - Anthropic 格式的 SSE
+		c.Response().Header.SetContentType("text/event-stream")
+		c.Response().Header.Set("Cache-Control", "no-cache")
+		c.Response().Header.Set("Connection", "keep-alive")
+
+		stream, chErr := routeResult.Adapter.ChatCompletionStream(c.Context(), openAIReq)
+		if chErr != nil {
+			go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), false, chErr.Error())
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": chErr.Error()})
+		}
+
+		// 流式转换 OpenAI 格式响应到 Anthropic 格式
+		for resp := range stream {
+			// 这里需要将 OpenAI 流式响应转换为 Anthropic 格式
+			// 简化处理：直接输出 OpenAI 格式（生产环境需要完整转换）
+			data, _ := json.Marshal(resp)
+			c.Write([]byte("data: "))
+			c.Write(data)
+			c.Write([]byte("\n\n"))
+		}
+		c.Write([]byte("data: [DONE]\n\n"))
+		go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), true, "")
+		return nil
+	}
+
+	result, err = routeResult.Adapter.ChatCompletion(c.Context(), openAIReq)
 	if err != nil {
+		go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), false, err.Error())
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 转换回 Claude 格式
-	claudeResp := convertOpenAIToClaude(result)
-	return c.JSON(claudeResp)
+	// 转换回 Anthropic 格式
+	anthropicResp := ConvertOpenAIToAnthropic(result)
+
+	// 包含压缩元数据（如果存在）
+	if compressionMetadata != nil {
+		// Anthropic 格式可能不支持自定义元数据字段，这里省略
+		// 可以考虑在响应头中添加元数据信息
+	}
+
+	go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), true, "")
+	return c.JSON(anthropicResp)
 }
 
 // recordRequestLog 记录请求日志
@@ -262,110 +422,6 @@ func (h *APIHandler) recordRequestLog(requestID string, routeResult *service.Rou
 	}
 
 	h.stats.RecordRequest(requestLog)
-}
-
-// Claude 请求/响应结构
-type claudeRequest struct {
-	Model     string          `json:"model"`
-	Messages  []claudeMessage `json:"messages"`
-	System    string          `json:"system,omitempty"`
-	MaxTokens int             `json:"max_tokens,omitempty"`
-	Stream    bool            `json:"stream,omitempty"`
-}
-
-type claudeMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type claudeResponse struct {
-	ID         string          `json:"id"`
-	Type       string          `json:"type"`
-	Role       string          `json:"role"`
-	Content    []claudeContent `json:"content"`
-	Model      string          `json:"model"`
-	StopReason string          `json:"stop_reason,omitempty"`
-	Usage      claudeUsage     `json:"usage"`
-}
-
-type claudeContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-}
-
-type claudeUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-}
-
-func convertClaudeToOpenAI(req *claudeRequest) *model.ChatCompletionRequest {
-	messages := make([]model.Message, 0, len(req.Messages)+1)
-
-	// 添加 system 消息
-	if req.System != "" {
-		messages = append(messages, model.Message{
-			Role:    "system",
-			Content: req.System,
-		})
-	}
-
-	// 添加对话消息
-	for _, m := range req.Messages {
-		role := m.Role
-		if role == "assistant" {
-			role = "assistant"
-		}
-		messages = append(messages, model.Message{
-			Role:    role,
-			Content: m.Content,
-		})
-	}
-
-	return &model.ChatCompletionRequest{
-		Model:     req.Model,
-		Messages:  messages,
-		MaxTokens: req.MaxTokens,
-		Stream:    req.Stream,
-	}
-}
-
-func convertOpenAIToClaude(resp *model.ChatCompletionResponse) *claudeResponse {
-	if len(resp.Choices) == 0 {
-		return &claudeResponse{
-			ID:   resp.ID,
-			Type: "message",
-			Role: "assistant",
-		}
-	}
-
-	choice := resp.Choices[0]
-	content := ""
-	if c, ok := choice.Message.Content.(string); ok {
-		content = c
-	}
-
-	stopReason := "end_turn"
-	switch choice.FinishReason {
-	case "length":
-		stopReason = "max_tokens"
-	case "stop":
-		stopReason = "end_turn"
-	}
-
-	return &claudeResponse{
-		ID:   resp.ID,
-		Type: "message",
-		Role: "assistant",
-		Content: []claudeContent{
-			{Type: "text", Text: content},
-		},
-		Model:      resp.Model,
-		StopReason: stopReason,
-		Usage: claudeUsage{
-			InputTokens:  resp.Usage.PromptTokens,
-			OutputTokens: resp.Usage.CompletionTokens,
-		},
-	}
 }
 
 // 兼容函数：透传到上游服务
@@ -395,5 +451,87 @@ func (h *APIHandler) proxyToUpstream(c *fiber.Ctx, targetURL string, body []byte
 	c.Response().SetStatusCode(resp.StatusCode)
 
 	io.Copy(c.Response().BodyWriter(), resp.Body)
+	return nil
+}
+
+// shouldApplyCompression 智能判断是否需要压缩
+func (h *APIHandler) shouldApplyCompression(profile *model.Profile, targetModel *model.Model, messages []model.Message) bool {
+	// 1. 检查 Profile 是否启用压缩
+	if !profile.EnableCompression {
+		return false
+	}
+
+	// 2. 检查模型是否标记为跳过压缩（如 1M+ 模型）
+	if targetModel.SkipCompression {
+		return false
+	}
+
+	// 3. 估算当前请求的 token 数量
+	estimatedTokens := estimateMessagesTokens(messages)
+
+	// 4. 根据压缩等级决策
+	switch profile.CompressionLevel {
+	case model.CompressionLevelSession:
+		// session 模式：每次都检查是否超出模型原生上下文窗口
+		return estimatedTokens > targetModel.ContextWindow
+	case model.CompressionLevelThreshold:
+		// threshold 模式：只在达到配置的阈值时压缩
+		return profile.CompressionThreshold > 0 && estimatedTokens >= profile.CompressionThreshold
+	default:
+		// 默认行为：检查是否超出模型原生上下文窗口
+		return estimatedTokens > targetModel.ContextWindow
+	}
+}
+
+// estimateMessagesTokens 估算消息列表的 token 数量
+func estimateMessagesTokens(messages []model.Message) int {
+	total := 0
+	for i := range messages {
+		total += estimateMessageTokens(&messages[i])
+	}
+	return total
+}
+
+// estimateMessageTokens 估算单条消息的 token 数量
+func estimateMessageTokens(msg *model.Message) int {
+	content := contentToString(msg.Content)
+	// 粗略估算：英文约 4 字符/token，中文约 2 字符/token
+	// 这里使用保守估计 4 字符/token
+	return len(content)/4 + 10 // 10 tokens 消息元数据开销
+}
+
+// contentToString 将消息内容转换为字符串
+func contentToString(content interface{}) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []model.ContentPart:
+		var sb strings.Builder
+		for _, part := range v {
+			if part.Type == "text" {
+				sb.WriteString(part.Text)
+				sb.WriteString(" ")
+			}
+		}
+		return sb.String()
+	default:
+		return fmt.Sprintf("%v", content)
+	}
+}
+
+// validateCompressionGroup validates that a compression group exists and is usable
+func (h *APIHandler) validateCompressionGroup(profile *service.ProfileInstance, groupName string) error {
+	if groupName == "" {
+		return fmt.Errorf("compression group name cannot be empty")
+	}
+	if profile.CompressionSelector == nil {
+		return fmt.Errorf("compression groups not configured for this profile")
+	}
+	// Check if group exists (no side effects - doesn't create adapter)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if !profile.CompressionSelector.GroupExists(ctx, groupName) {
+		return fmt.Errorf("compression group not found: %s", groupName)
+	}
 	return nil
 }

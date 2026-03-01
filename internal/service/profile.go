@@ -4,25 +4,41 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gemone/model-router/internal/adapter"
+	compressionpkg "github.com/gemone/model-router/internal/compression"
 	"github.com/gemone/model-router/internal/config"
 	"github.com/gemone/model-router/internal/database"
 	"github.com/gemone/model-router/internal/model"
+	"github.com/gemone/model-router/internal/repository"
+	compressionservice "github.com/gemone/model-router/internal/service/compression"
 )
+
+// containsString 检查字符串是否在字符串切片中
+func containsString(slice []string, item string) bool {
+	return slices.Contains(slice, item)
+}
 
 // ProfileInstance Profile 实例
 type ProfileInstance struct {
 	sync.RWMutex
-	Profile     *model.Profile
-	adapters    map[string]adapter.Adapter // providerID -> adapter
-	providerMap map[string]*model.Provider // providerID -> provider
-	modelMap    map[string][]*model.Model  // modelName -> models
-	routeRules  []model.RouteRule
-	stats       *StatsCollector
+	Profile              *model.Profile
+	adapters             map[string]adapter.Adapter // providerID -> adapter
+	providerMap          map[string]*model.Provider // providerID -> provider
+	modelMap             map[string][]*model.Model  // modelName -> models
+	stats                *StatsCollector
+	// DEPRECATED: Use compressionService instead (kept for backward compatibility during v3 refactoring)
+	compressionPipeline  *compressionpkg.CompressionPipeline
+	// DEPRECATED: Use compressionService.GetSelector() instead (kept for backward compatibility)
+	CompressionSelector  *repository.CompressionGroupSelector
+	// NEW: Independent compression service
+	compressionService   compressionservice.Service
+	compositeModels      map[string]*model.CompositeAutoModel // compositeModelName -> composite model
+	compositeService     *CompositeService                  // Composite service for routing
 }
 
 // ProfileManager Profile 管理器
@@ -61,7 +77,11 @@ func GetProfileManager() *ProfileManager {
 func (pm *ProfileManager) LoadFromDB() error {
 	pm.Lock()
 	defer pm.Unlock()
+	return pm.loadFromDB_unlocked()
+}
 
+// loadFromDB_unlocked 内部方法，不加锁版本
+func (pm *ProfileManager) loadFromDB_unlocked() error {
 	db := database.GetDB()
 
 	// 加载所有 Profile
@@ -87,17 +107,21 @@ func (pm *ProfileManager) LoadFromDB() error {
 		p := &profiles[i]
 		if p.Enabled {
 			instance := &ProfileInstance{
-				Profile:     p,
-				adapters:    make(map[string]adapter.Adapter),
-				providerMap: make(map[string]*model.Provider),
-				modelMap:    make(map[string][]*model.Model),
-				stats:       GetStatsCollector(),
+				Profile:            p,
+				adapters:           make(map[string]adapter.Adapter),
+				providerMap:        make(map[string]*model.Provider),
+				modelMap:           make(map[string][]*model.Model),
+				stats:              GetStatsCollector(),
+				compressionPipeline: compressionpkg.NewPipeline(), // DEPRECATED: kept for backward compatibility
 			}
 			instance.loadData()
+			instance.initCompression()
 			pm.profiles[p.Path] = instance
 
 			// 记录默认 Profile（优先级最高的）
-			if pm.defaultProfile == "" || p.Priority > pm.profiles[pm.defaultProfile].Profile.Priority {
+			if pm.defaultProfile == "" {
+				pm.defaultProfile = p.Path
+			} else if existingInstance, ok := pm.profiles[pm.defaultProfile]; ok && p.Priority > existingInstance.Profile.Priority {
 				pm.defaultProfile = p.Path
 			}
 		}
@@ -110,12 +134,9 @@ func (pm *ProfileManager) LoadFromDB() error {
 func (pi *ProfileInstance) loadData() error {
 	db := database.GetDB()
 
-	// 加载该 Profile 的路由规则
-	db.Where("profile_id = ?", pi.Profile.ID).Find(&pi.routeRules)
-
-	// 加载所有供应商及其模型
+	// 加载所有供应商
 	var providers []model.Provider
-	db.Preload("Models", "profile_id = ?", pi.Profile.ID).Find(&providers)
+	db.Find(&providers)
 
 	for i := range providers {
 		p := &providers[i]
@@ -127,17 +148,171 @@ func (pi *ProfileInstance) loadData() error {
 				pi.adapters[p.ID] = adp
 			}
 		}
+	}
 
-		// 建立模型映射（只添加属于该 Profile 的模型）
-		for j := range p.Models {
-			m := &p.Models[j]
-			if m.Enabled && m.ProfileID == pi.Profile.ID {
+	// 根据 Profile.ModelIDs 加载模型
+	if len(pi.Profile.ModelIDs) > 0 {
+		var models []model.Model
+		db.Where("id IN ?", pi.Profile.ModelIDs).Find(&models)
+
+		for j := range models {
+			m := &models[j]
+			if m.Enabled {
 				pi.modelMap[m.Name] = append(pi.modelMap[m.Name], m)
 			}
 		}
 	}
 
+	// 加载复合模型
+	var compositeModels []model.CompositeAutoModel
+	db.Where("profile_id = ? AND enabled = ?", pi.Profile.ID, true).Find(&compositeModels)
+	pi.compositeModels = make(map[string]*model.CompositeAutoModel)
+	for i := range compositeModels {
+		cm := &compositeModels[i]
+		pi.compositeModels[cm.Name] = cm
+	}
+
+	// 初始化复合模型服务
+	if len(pi.compositeModels) > 0 {
+		compositeService, err := NewCompositeModelService(pi.Profile.ID)
+		if err != nil {
+			fmt.Printf("Warning: failed to create composite service for profile %s: %v\n", pi.Profile.ID, err)
+		} else {
+			pi.compositeService = compositeService
+		}
+	}
+
 	return nil
+}
+
+// initCompression 初始化压缩策略
+func (pi *ProfileInstance) initCompression() {
+	// Only initialize if compression is enabled for this profile
+	if !pi.Profile.EnableCompression {
+		return
+	}
+
+	// DEPRECATED: Initialize legacy compression pipeline for backward compatibility
+	// This will be removed in Phase 4 of the refactoring
+	var adapterForCompression adapter.Adapter
+	for _, adp := range pi.adapters {
+		adapterForCompression = adp
+		break
+	}
+
+	if adapterForCompression == nil {
+		return
+	}
+
+	// Register compression strategies based on profile config
+	switch pi.Profile.CompressionStrategy {
+	case "sliding_window", "hybrid", "":
+		// Sliding window is always registered as it's the primary strategy
+		// Wrap with NewLegacyStrategy for backward compatibility
+		strategy := compressionpkg.NewLegacyStrategy(
+			compressionpkg.NewSlidingWindowStrategy(adapterForCompression),
+			adapterForCompression,
+		)
+		pi.compressionPipeline.Register(strategy)
+	}
+
+	// Initialize compression group selector if profile has compression groups configured
+	var selector *repository.CompressionGroupSelector
+	if len(pi.Profile.CompressionGroups) > 0 || pi.Profile.DefaultCompressionGroup != "" {
+		var err error
+		selector, err = repository.NewCompressionGroupSelector(
+			pi.Profile.ID,
+			GetStatsCollector(),
+			nil, // GetCompressionMetrics() not needed for now
+		)
+		if err != nil {
+			// Log warning but don't fail - compression will fall back to legacy mode
+			fmt.Printf("Warning: failed to initialize compression group selector: %v\n", err)
+		} else {
+			pi.CompressionSelector = selector
+		}
+	}
+
+	// NEW: Initialize independent compression service
+	factory := compressionservice.NewFactory(nil) // Use default config
+	pi.compressionService = factory.CreateService(pi.Profile, pi.adapters, selector)
+}
+
+// ApplyCompression 应用压缩策略到消息列表
+// NEW SIGNATURE: Accepts session and compression group parameters for model selection
+// REFACTORED: Now uses the independent compression service
+func (pi *ProfileInstance) ApplyCompression(ctx context.Context, session *model.Session, maxTokens int, compressionGroup *string) ([]model.Message, *model.CompressionMetadata, error) {
+	// Use the new compression service if available
+	if pi.compressionService != nil {
+		return pi.compressionService.Compress(ctx, pi.Profile, session, maxTokens, compressionGroup)
+	}
+
+	// Fallback to legacy implementation for backward compatibility during v3 refactoring
+	if !pi.Profile.EnableCompression || pi.compressionPipeline == nil {
+		// Return empty messages with empty metadata when compression is disabled
+		return []model.Message{}, &model.CompressionMetadata{}, nil
+	}
+
+	// 1. Determine compression group using helper
+	groupName := pi.getCompressionGroupName(compressionGroup)
+
+	// 2. Create getAdapter function with fallback logic
+	getAdapter := func(ctx context.Context) (adapter.Adapter, error) {
+		if groupName == "" {
+			// Legacy mode: return first available adapter
+			for _, adp := range pi.adapters {
+				return adp, nil
+			}
+			return nil, fmt.Errorf("no adapter available for compression")
+		}
+		// Group mode: use compression selector with fallback
+		if pi.CompressionSelector != nil {
+			adp, _, _, err := pi.CompressionSelector.SelectAdapter(ctx, groupName)
+			if err == nil {
+				return adp, nil
+			}
+			// Fall through to legacy adapter on error
+		}
+		// Fallback: return first available adapter
+		for _, adp := range pi.adapters {
+			return adp, nil
+		}
+		return nil, fmt.Errorf("no adapter available for compression")
+	}
+
+	// 3. Build strategy configs from profile settings
+	configs := []compressionpkg.StrategyConfig{
+		{
+			Name:      pi.Profile.CompressionStrategy,
+			MaxTokens: maxTokens,
+			Weight:    100,
+		},
+	}
+
+	// 4. Call compression pipeline
+	result, err := pi.compressionPipeline.Compress(ctx, session, maxTokens, configs, getAdapter)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 5. Populate CompressionMetadata
+	metadata := &model.CompressionMetadata{
+		GroupUsed:    groupName,
+		FallbackUsed: groupName != "" && pi.CompressionSelector == nil,
+		TokensAfter:  result.TotalTokens,
+	}
+
+	// Get tokens before from first strategy stat if available
+	if len(result.Stats) > 0 {
+		metadata.TokensBefore = result.Stats[0].InputTokens
+	}
+
+	// Calculate compression ratio
+	if metadata.TokensBefore > 0 {
+		metadata.CompressionRatio = float64(metadata.TokensAfter) / float64(metadata.TokensBefore)
+	}
+
+	return result.Messages, metadata, nil
 }
 
 // GetProfile 通过路径获取 Profile
@@ -229,6 +404,7 @@ func (pm *ProfileManager) CreateProfile(p *model.Profile) error {
 		providerMap: make(map[string]*model.Provider),
 		modelMap:    make(map[string][]*model.Model),
 		stats:       GetStatsCollector(),
+		// compressionService will be initialized lazily when needed
 	}
 	pm.profiles[p.Path] = instance
 
@@ -253,16 +429,51 @@ func (pm *ProfileManager) UpdateProfile(p *model.Profile) error {
 	}
 
 	// 如果 path 变更，需要更新 map 的 key
-	if oldProfile.Path != p.Path {
-		if instance, ok := pm.profiles[oldProfile.Path]; ok {
-			delete(pm.profiles, oldProfile.Path)
-			pm.profiles[p.Path] = instance
+	oldPath := oldProfile.Path
+	newPath := p.Path
+
+	if oldPath != newPath {
+		if instance, ok := pm.profiles[oldPath]; ok {
+			delete(pm.profiles, oldPath)
+			pm.profiles[newPath] = instance
 		}
 	}
 
-	// 更新内存中的数据
-	if instance, ok := pm.profiles[p.Path]; ok {
+	// 更新内存中的数据 - 如果存在就更新，不存在就重新加载
+	if instance, ok := pm.profiles[newPath]; ok {
 		instance.Profile = p
+		// Re-initialize compression pipeline with new settings
+		instance.initCompression()
+	} else {
+		// Profile doesn't exist in memory, reload from DB
+		return pm.loadProfile_unlocked(p)
+	}
+
+	return nil
+}
+
+// loadProfile_unlocked 加载单个 Profile (内部方法，不加锁)
+func (pm *ProfileManager) loadProfile_unlocked(p *model.Profile) error {
+	if !p.Enabled {
+		return nil
+	}
+
+	instance := &ProfileInstance{
+		Profile:            p,
+		adapters:           make(map[string]adapter.Adapter),
+		providerMap:        make(map[string]*model.Provider),
+		modelMap:           make(map[string][]*model.Model),
+		stats:              GetStatsCollector(),
+		compressionPipeline: compressionpkg.NewPipeline(), // DEPRECATED: kept for backward compatibility
+	}
+	instance.loadData()
+	instance.initCompression()
+
+	pm.profiles[p.Path] = instance
+
+	// 更新默认 Profile
+	if pm.defaultProfile == "" || p.Priority > pm.profiles[pm.defaultProfile].Profile.Priority {
+		pm.defaultProfile = p.Path
 	}
 
 	return nil
@@ -306,7 +517,13 @@ func (pm *ProfileManager) Refresh(path string) error {
 	instance.adapters = make(map[string]adapter.Adapter)
 	instance.providerMap = make(map[string]*model.Provider)
 	instance.modelMap = make(map[string][]*model.Model)
-	instance.routeRules = nil
+	instance.compositeModels = make(map[string]*model.CompositeAutoModel)
+
+	// Close old composite service if exists
+	if instance.compositeService != nil {
+		instance.compositeService.Close()
+		instance.compositeService = nil
+	}
 	instance.Unlock()
 
 	return instance.loadData()
@@ -320,7 +537,7 @@ func (pm *ProfileManager) RefreshAll() error {
 	// 清空现有
 	pm.profiles = make(map[string]*ProfileInstance)
 
-	return pm.LoadFromDB()
+	return pm.loadFromDB_unlocked()
 }
 
 // ==================== ProfileInstance 方法 ====================
@@ -330,44 +547,10 @@ func (pi *ProfileInstance) Route(ctx context.Context, modelName string) (*RouteR
 	pi.RLock()
 	defer pi.RUnlock()
 
-	// 1. 首先检查是否有匹配的路由规则
-	for _, rule := range pi.routeRules {
-		if !matchPattern(modelName, rule.ModelPattern) {
-			continue
-		}
-
-		targetModel := pi.selectModelByStrategy(&rule, modelName)
-		if targetModel != nil {
-			provider, adapter := pi.getProviderAndAdapter(targetModel.ProviderID)
-			if provider != nil && adapter != nil && provider.Enabled {
-				return &RouteResult{
-					Adapter:      adapter,
-					Model:        targetModel,
-					Provider:     provider,
-					Profile:      pi.Profile,
-					FallbackUsed: false,
-				}, nil
-			}
-		}
-
-		// 尝试 fallback
-		if rule.FallbackEnabled && len(rule.FallbackModels) > 0 {
-			for _, fallbackModelName := range rule.FallbackModels {
-				if models, ok := pi.modelMap[fallbackModelName]; ok && len(models) > 0 {
-					for _, m := range models {
-						provider, adapter := pi.getProviderAndAdapter(m.ProviderID)
-						if provider != nil && adapter != nil && provider.Enabled {
-							return &RouteResult{
-								Adapter:      adapter,
-								Model:        m,
-								Provider:     provider,
-								Profile:      pi.Profile,
-								FallbackUsed: true,
-							}, nil
-						}
-					}
-				}
-			}
+	// 1. 首先检查是否是复合模型
+	if compositeModel, ok := pi.compositeModels[modelName]; ok && compositeModel.Enabled {
+		if pi.compositeService != nil {
+			return pi.compositeService.Route(ctx, pi, modelName)
 		}
 	}
 
@@ -408,97 +591,6 @@ func (pi *ProfileInstance) RouteWithFallback(ctx context.Context, modelName stri
 	return result, nil
 }
 
-// selectModelByStrategy 根据策略选择模型
-func (pi *ProfileInstance) selectModelByStrategy(rule *model.RouteRule, modelName string) *model.Model {
-	switch rule.Strategy {
-	case model.RouteStrategyPriority:
-		return pi.selectByPriority(rule.TargetModels)
-	case model.RouteStrategyWeighted:
-		return pi.selectByWeight(rule.TargetModels)
-	case model.RouteStrategyAuto:
-		return pi.selectByHealth(rule.TargetModels)
-	default:
-		return pi.selectByPriority(rule.TargetModels)
-	}
-}
-
-// selectByPriority 按优先级选择
-func (pi *ProfileInstance) selectByPriority(modelNames []string) *model.Model {
-	var bestModel *model.Model
-	bestPriority := -1
-
-	for _, name := range modelNames {
-		if models, ok := pi.modelMap[name]; ok {
-			for _, m := range models {
-				provider := pi.providerMap[m.ProviderID]
-				if provider != nil && provider.Priority > bestPriority {
-					bestPriority = provider.Priority
-					bestModel = m
-				}
-			}
-		}
-	}
-
-	return bestModel
-}
-
-// selectByWeight 按权重选择
-func (pi *ProfileInstance) selectByWeight(modelNames []string) *model.Model {
-	type weightedModel struct {
-		model  *model.Model
-		weight int
-	}
-
-	var weightedModels []weightedModel
-	totalWeight := 0
-
-	for _, name := range modelNames {
-		if models, ok := pi.modelMap[name]; ok {
-			for _, m := range models {
-				provider := pi.providerMap[m.ProviderID]
-				if provider != nil {
-					weightedModels = append(weightedModels, weightedModel{m, provider.Weight})
-					totalWeight += provider.Weight
-				}
-			}
-		}
-	}
-
-	if len(weightedModels) == 0 {
-		return nil
-	}
-
-	randVal := time.Now().UnixNano() % int64(totalWeight)
-	for _, wm := range weightedModels {
-		randVal -= int64(wm.weight)
-		if randVal < 0 {
-			return wm.model
-		}
-	}
-
-	return weightedModels[0].model
-}
-
-// selectByHealth 按健康度选择
-func (pi *ProfileInstance) selectByHealth(modelNames []string) *model.Model {
-	var bestModel *model.Model
-	bestScore := -1.0
-
-	for _, name := range modelNames {
-		if models, ok := pi.modelMap[name]; ok {
-			for _, m := range models {
-				score := pi.stats.GetHealthScore(m.ProviderID, m.Name)
-				if score > bestScore {
-					bestScore = score
-					bestModel = m
-				}
-			}
-		}
-	}
-
-	return bestModel
-}
-
 // selectBestModel 选择最佳模型
 func (pi *ProfileInstance) selectBestModel(models []*model.Model) *model.Model {
 	if len(models) == 0 {
@@ -533,21 +625,18 @@ func (pi *ProfileInstance) selectBestModel(models []*model.Model) *model.Model {
 
 // tryFallback 尝试 fallback
 func (pi *ProfileInstance) tryFallback(modelName string) *RouteResult {
-	for _, rule := range pi.routeRules {
-		if matchPattern(modelName, rule.ModelPattern) && rule.FallbackEnabled {
-			for _, fallbackName := range rule.FallbackModels {
-				if models, ok := pi.modelMap[fallbackName]; ok {
-					for _, m := range models {
-						provider, adapter := pi.getProviderAndAdapter(m.ProviderID)
-						if provider != nil && adapter != nil && provider.Enabled {
-							return &RouteResult{
-								Adapter:      adapter,
-								Model:        m,
-								Provider:     provider,
-								Profile:      pi.Profile,
-								FallbackUsed: true,
-							}
-						}
+	// Use Profile.FallbackModels for fallback
+	for _, fallbackName := range pi.Profile.FallbackModels {
+		if models, ok := pi.modelMap[fallbackName]; ok {
+			for _, m := range models {
+				provider, adapter := pi.getProviderAndAdapter(m.ProviderID)
+				if provider != nil && adapter != nil && provider.Enabled {
+					return &RouteResult{
+						Adapter:      adapter,
+						Model:        m,
+						Provider:     provider,
+						Profile:      pi.Profile,
+						FallbackUsed: true,
 					}
 				}
 			}
@@ -650,8 +739,14 @@ func (pi *ProfileInstance) TestModel(ctx context.Context, providerID, modelName 
 		return nil, fmt.Errorf("model not found: %s", modelName)
 	}
 
+	// Use OriginalName for the actual API call, fallback to modelName if empty
+	actualModelName := targetModel.OriginalName
+	if actualModelName == "" {
+		actualModelName = modelName
+	}
+
 	req := &model.ChatCompletionRequest{
-		Model: modelName,
+		Model: actualModelName,
 		Messages: []model.Message{
 			{Role: "user", Content: "Hello, this is a test message. Please respond with 'OK'."},
 		},
@@ -680,6 +775,68 @@ func (pi *ProfileInstance) TestModel(ctx context.Context, providerID, modelName 
 	db.Create(testResult)
 
 	return testResult, nil
+}
+
+// GetAdapterForModel 获取指定模型的适配器
+func (pi *ProfileInstance) GetAdapterForModel(modelName, providerID string) (adapter.Adapter, *model.Model, error) {
+	pi.RLock()
+	defer pi.RUnlock()
+
+	// Look up models by name
+	models, ok := pi.modelMap[modelName]
+	if !ok || len(models) == 0 {
+		return nil, nil, fmt.Errorf("model not found: %s", modelName)
+	}
+
+	// If provider specified, find that specific one
+	if providerID != "" {
+		for _, m := range models {
+			if m.ProviderID == providerID {
+				_, ok := pi.providerMap[m.ProviderID]
+				if !ok {
+					return nil, nil, fmt.Errorf("provider not found: %s", m.ProviderID)
+				}
+				adp, ok := pi.adapters[m.ProviderID]
+				if !ok {
+					return nil, nil, fmt.Errorf("adapter not found for provider: %s", m.ProviderID)
+				}
+				return adp, m, nil
+			}
+		}
+		return nil, nil, fmt.Errorf("model '%s' not found for provider '%s'", modelName, providerID)
+	}
+
+	// No provider specified - use first available
+	for _, m := range models {
+		_, ok := pi.providerMap[m.ProviderID]
+		if !ok {
+			continue
+		}
+		adp, ok := pi.adapters[m.ProviderID]
+		if ok {
+			return adp, m, nil
+		}
+	}
+
+	return nil, nil, fmt.Errorf("no adapter available for model: %s", modelName)
+}
+
+// GetCompositeModel returns the composite model definition by name
+func (pi *ProfileInstance) GetCompositeModel(modelName string) (*model.CompositeAutoModel, bool) {
+	pi.RLock()
+	defer pi.RUnlock()
+
+	composite, ok := pi.compositeModels[modelName]
+	return composite, ok
+}
+
+// getCompressionGroupName determines which compression group to use
+// Priority: API override > profile default > empty (legacy mode)
+func (pi *ProfileInstance) getCompressionGroupName(apiGroup *string) string {
+	if apiGroup != nil && *apiGroup != "" {
+		return *apiGroup
+	}
+	return pi.Profile.DefaultCompressionGroup
 }
 
 // 辅助函数

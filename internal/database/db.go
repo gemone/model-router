@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gemone/model-router/internal/model"
+	// "github.com/gemone/model-router/internal/model" // TODO: Re-enable for auto-migrate
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -40,18 +40,58 @@ func Init(dbPath string) error {
 		return fmt.Errorf("failed to connect database: %w", err)
 	}
 
-	// 自动迁移
-	return db.AutoMigrate(
-		&model.Profile{},
-		&model.Provider{},
-		&model.Model{},
-		&model.RouteRule{},
-		&model.RequestLog{},
-		&model.APIKey{},
-		&model.Stats{},
-		&model.Setting{},
-		&model.TestResult{},
-	)
+	// 自动迁移 disabled - tables already set up manually
+	// TODO: Re-enable after fixing GORM SQLite FOREIGN KEY parsing issue
+
+	// 创建索引
+	if err := createCompressionGroupIndexes(db); err != nil {
+		return err
+	}
+	if err := createCompositeAutoModelIndexes(db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createCompressionGroupIndexes(db *gorm.DB) error {
+	// Composite lookup index
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_compression_group_profile_name
+		ON compression_model_groups(profile_id, name)
+	`).Error; err != nil {
+		return fmt.Errorf("failed to create profile_name index: %w", err)
+	}
+
+	// Enabled groups index
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_compression_group_enabled
+		ON compression_model_groups(enabled) WHERE enabled = true
+	`).Error; err != nil {
+		return fmt.Errorf("failed to create enabled index: %w", err)
+	}
+
+	return nil
+}
+
+func createCompositeAutoModelIndexes(db *gorm.DB) error {
+	// Composite lookup index
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_composite_auto_model_profile_name
+		ON composite_auto_models(profile_id, name)
+	`).Error; err != nil {
+		return fmt.Errorf("failed to create profile_name index: %w", err)
+	}
+
+	// Enabled models index
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_composite_auto_model_enabled
+		ON composite_auto_models(enabled) WHERE enabled = true
+	`).Error; err != nil {
+		return fmt.Errorf("failed to create enabled index: %w", err)
+	}
+
+	return nil
 }
 
 // GetDB 获取数据库实例

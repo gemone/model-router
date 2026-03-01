@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gemone/model-router/internal/config"
 	"github.com/gemone/model-router/internal/database"
@@ -50,13 +51,6 @@ func (h *AdminHandler) RegisterRoutes(r fiber.Router) {
 	r.Put("/models/:id", h.UpdateModel)
 	r.Delete("/models/:id", h.DeleteModel)
 
-	// Route 管理
-	r.Get("/routes", h.ListRoutes)
-	r.Post("/routes", h.CreateRoute)
-	r.Get("/routes/:id", h.GetRoute)
-	r.Put("/routes/:id", h.UpdateRoute)
-	r.Delete("/routes/:id", h.DeleteRoute)
-
 	// 统计数据
 	r.Get("/stats/dashboard", h.GetDashboardStats)
 	r.Get("/stats/provider/:id", h.GetProviderStats)
@@ -64,6 +58,7 @@ func (h *AdminHandler) RegisterRoutes(r fiber.Router) {
 
 	// 日志
 	r.Get("/logs", h.GetLogs)
+	r.Delete("/logs", h.ClearLogs)
 
 	// 测试
 	r.Post("/test", h.TestModel)
@@ -112,16 +107,59 @@ func (h *AdminHandler) CreateProfile(c *fiber.Ctx) error {
 // UpdateProfile 更新 Profile
 func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
 	id := c.Params("id")
-	var profile model.Profile
-	if err := c.BodyParser(&profile); err != nil {
+
+	// Get existing profile first
+	db := database.GetDB()
+	var existingProfile model.Profile
+	if err := db.First(&existingProfile, "id = ?", id).Error; err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
+	}
+
+	// Parse only the fields we want to update
+	var updates struct {
+		Name                *string `json:"name"`
+		Path                *string `json:"path"`
+		Description         *string `json:"description"`
+		Enabled             *bool   `json:"enabled"`
+		Priority            *int    `json:"priority"`
+		EnableCompression   *bool   `json:"enable_compression"`
+		CompressionStrategy *string `json:"compression_strategy"`
+		MaxContextWindow    *int    `json:"max_context_window"`
+	}
+	if err := c.BodyParser(&updates); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	profile.ID = id
 
-	if err := h.profileManager.UpdateProfile(&profile); err != nil {
+	// Update only provided fields
+	if updates.Name != nil {
+		existingProfile.Name = *updates.Name
+	}
+	if updates.Path != nil && *updates.Path != "" {
+		existingProfile.Path = *updates.Path
+	}
+	if updates.Description != nil {
+		existingProfile.Description = *updates.Description
+	}
+	if updates.Enabled != nil {
+		existingProfile.Enabled = *updates.Enabled
+	}
+	if updates.Priority != nil {
+		existingProfile.Priority = *updates.Priority
+	}
+	if updates.EnableCompression != nil {
+		existingProfile.EnableCompression = *updates.EnableCompression
+	}
+	if updates.CompressionStrategy != nil {
+		existingProfile.CompressionStrategy = *updates.CompressionStrategy
+	}
+	if updates.MaxContextWindow != nil {
+		existingProfile.MaxContextWindow = *updates.MaxContextWindow
+	}
+
+	if err := h.profileManager.UpdateProfile(&existingProfile); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(profile)
+	return c.JSON(existingProfile)
 }
 
 // DeleteProfile 删除 Profile
@@ -382,100 +420,89 @@ func (h *AdminHandler) DetectModelCapabilities(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	// 获取 Provider 类型以确定能力检测策略
+	db := database.GetDB()
+	var provider model.Provider
+	if err := db.First(&provider, "id = ?", req.ProviderID).Error; err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "provider not found"})
+	}
+
+	// 基于模型名称和 Provider 类型检测能力
+	supportsFunc := detectFunctionCapability(string(provider.Type), req.ModelName)
+	supportsVision := detectVisionCapability(string(provider.Type), req.ModelName)
+
 	return c.JSON(fiber.Map{
-		"supports_function": false,
-		"supports_vision":   false,
-		"message":          "Capabilities detection not implemented yet",
+		"supports_function": supportsFunc,
+		"supports_vision":   supportsVision,
+		"message":          "Capabilities detected based on model name patterns",
 	})
 }
 
-// ==================== Route 管理 ====================
-
-// ListRoutes 列出 Route Rules
-func (h *AdminHandler) ListRoutes(c *fiber.Ctx) error {
-	db := database.GetDB()
-	var rules []model.RouteRule
-
-	if err := db.Find(&rules).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+// detectFunctionCapability 检测模型是否支持函数调用
+func detectFunctionCapability(providerType, modelName string) bool {
+	// OpenAI 模型
+	if providerType == "openai" || providerType == "azure" || providerType == "openai-compatible" {
+		// GPT-4 系列支持函数调用
+		if contains(modelName, "gpt-4") || contains(modelName, "gpt-3.5-turbo") || contains(modelName, "gpt-4o") {
+			return true
+		}
 	}
 
-	return c.JSON(rules)
+	// Anthropic 模型
+	if providerType == "anthropic" {
+		// Claude 3 系列支持函数调用
+		if contains(modelName, "claude-3") {
+			return true
+		}
+	}
+
+	// DeepSeek 模型
+	if providerType == "deepseek" {
+		// deepseek-chat 和 deepseek-coder 支持
+		if contains(modelName, "deepseek-chat") || contains(modelName, "deepseek-coder") {
+			return true
+		}
+	}
+
+	return false
 }
 
-// GetRoute 获取单个 Route
-func (h *AdminHandler) GetRoute(c *fiber.Ctx) error {
-	id := c.Params("id")
-	db := database.GetDB()
-
-	var rule model.RouteRule
-	if err := db.First(&rule, "id = ?", id).Error; err != nil {
-		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "route not found"})
+// detectVisionCapability 检测模型是否支持视觉
+func detectVisionCapability(providerType, modelName string) bool {
+	// OpenAI 模型 - 带 vision 或 v 的版本
+	if providerType == "openai" || providerType == "azure" || providerType == "openai-compatible" {
+		if contains(modelName, "vision") || contains(modelName, "-4o") || contains(modelName, "-4-turbo") {
+			return true
+		}
 	}
 
-	return c.JSON(rule)
+	// Anthropic 模型 - Claude 3 系列都支持视觉
+	if providerType == "anthropic" {
+		if contains(modelName, "claude-3") {
+			return true
+		}
+	}
+
+	// DeepSeek - VL 模型支持
+	if providerType == "deepseek" {
+		if contains(modelName, "vl") || contains(modelName, "vision") {
+			return true
+		}
+	}
+
+	// Ollama - 多模态模型
+	if providerType == "ollama" {
+		if contains(modelName, "llava") || contains(modelName, "vision") || contains(modelName, "mm") {
+			return true
+		}
+	}
+
+	return false
 }
 
-// CreateRoute 创建 Route Rule
-func (h *AdminHandler) CreateRoute(c *fiber.Ctx) error {
-	var rule model.RouteRule
-	if err := c.BodyParser(&rule); err != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	rule.ID = uuid.New().String()
-
-	db := database.GetDB()
-	if err := db.Create(&rule).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	// 刷新 Profile
-	h.profileManager.RefreshAll()
-
-	return c.Status(http.StatusCreated).JSON(rule)
-}
-
-// UpdateRoute 更新 Route Rule
-func (h *AdminHandler) UpdateRoute(c *fiber.Ctx) error {
-	id := c.Params("id")
-
-	var rule model.RouteRule
-	if err := c.BodyParser(&rule); err != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-	}
-	rule.ID = id
-
-	db := database.GetDB()
-
-	var existing model.RouteRule
-	if err := db.First(&existing, "id = ?", id).Error; err != nil {
-		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "route not found"})
-	}
-
-	if err := db.Save(&rule).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	// 刷新 Profile
-	h.profileManager.RefreshAll()
-
-	return c.JSON(rule)
-}
-
-// DeleteRoute 删除 Route Rule
-func (h *AdminHandler) DeleteRoute(c *fiber.Ctx) error {
-	id := c.Params("id")
-
-	db := database.GetDB()
-	if err := db.Delete(&model.RouteRule{}, "id = ?", id).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	// 刷新 Profile
-	h.profileManager.RefreshAll()
-
-	return c.SendStatus(http.StatusNoContent)
+// contains 检查字符串是否包含子串（不区分大小写）
+func contains(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 // ==================== 统计数据 ====================
@@ -533,6 +560,14 @@ func (h *AdminHandler) GetLogs(c *fiber.Ctx) error {
 		"logs":  logs,
 		"total": total,
 	})
+}
+
+// ClearLogs 清空日志
+func (h *AdminHandler) ClearLogs(c *fiber.Ctx) error {
+	if err := h.stats.ClearLogs(); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(http.StatusNoContent).SendString("")
 }
 
 // ==================== 测试 ====================

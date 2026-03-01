@@ -429,3 +429,9 @@ func (sc *StatsCollector) GetRequestLogs(page, pageSize int) ([]model.RequestLog
 
 	return logs, total
 }
+
+// ClearLogs 清空所有请求日志
+func (sc *StatsCollector) ClearLogs() error {
+	db := database.GetDB()
+	return db.Where("1 = 1").Delete(&model.RequestLog{}).Error
+}

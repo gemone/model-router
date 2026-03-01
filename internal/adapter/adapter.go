@@ -21,6 +21,9 @@ type Adapter interface {
 	// ChatCompletion 执行聊天完成请求
 	ChatCompletion(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error)
 
+	// ChatCompletions 执行聊天完成请求（与ChatCompletion相同，用于接口兼容）
+	ChatCompletions(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error)
+
 	// ChatCompletionStream 执行流式聊天完成请求
 	ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error)
 
@@ -48,6 +51,16 @@ type Adapter interface {
 	// DoRequest 执行HTTP请求
 	DoRequest(ctx context.Context, method, path string, body interface{}) (*http.Response, error)
 }
+
+// Type aliases for compatibility with existing code
+type (
+	ChatCompletionRequest       = model.ChatCompletionRequest
+	ChatCompletionResponse      = model.ChatCompletionResponse
+	ChatCompletionStreamResponse = model.ChatCompletionStreamResponse
+	EmbeddingRequest            = model.EmbeddingRequest
+	EmbeddingResponse           = model.EmbeddingResponse
+	ListModelsResponse          = model.ListModelsResponse
+)
 
 // AdapterFactory 适配器工厂
 type AdapterFactory struct {
@@ -78,4 +91,51 @@ func GetSupportedTypes() []model.ProviderType {
 		types = append(types, t)
 	}
 	return types
+}
+
+// HealthStatus represents the health check result
+type HealthStatus struct {
+	Healthy   bool   `json:"healthy"`
+	Message   string `json:"message,omitempty"`
+	LatencyMs int64  `json:"latency_ms,omitempty"`
+}
+
+// ProviderError wraps provider-specific errors with context
+type ProviderError struct {
+	ProviderType model.ProviderType `json:"provider_type"`
+	Message      string             `json:"message"`
+	StatusCode   int                `json:"status_code,omitempty"`
+	Err          error              `json:"-"`
+}
+
+// Error returns the error message
+func (e *ProviderError) Error() string {
+	if e.Err != nil {
+		return string(e.ProviderType) + ": " + e.Message + ": " + e.Err.Error()
+	}
+	return string(e.ProviderType) + ": " + e.Message
+}
+
+// Unwrap returns the underlying error
+func (e *ProviderError) Unwrap() error {
+	return e.Err
+}
+
+// NewProviderError creates a new provider error
+func NewProviderError(providerType model.ProviderType, message string, err error) *ProviderError {
+	return &ProviderError{
+		ProviderType: providerType,
+		Message:      message,
+		Err:          err,
+	}
+}
+
+// NewProviderErrorWithStatus creates a new provider error with HTTP status code
+func NewProviderErrorWithStatus(providerType model.ProviderType, message string, statusCode int, err error) *ProviderError {
+	return &ProviderError{
+		ProviderType: providerType,
+		Message:      message,
+		StatusCode:   statusCode,
+		Err:          err,
+	}
 }

@@ -14,16 +14,20 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/joho/godotenv"
 
 	// Import adapters to register them
+	_ "github.com/gemone/model-router/internal/adapter"
 	_ "github.com/gemone/model-router/internal/adapter/anthropic"
 	_ "github.com/gemone/model-router/internal/adapter/deepseek"
 	_ "github.com/gemone/model-router/internal/adapter/ollama"
-	_ "github.com/gemone/model-router/internal/adapter/openai"
 	_ "github.com/gemone/model-router/internal/adapter/openai_compatible"
 )
 
 func main() {
+	// Load .env file (optional - ignore errors if file doesn't exist)
+	_ = godotenv.Load()
+
 	// 加载配置
 	cfg := config.Load()
 
@@ -70,8 +74,10 @@ func main() {
 
 	// Admin API
 	adminHandler := handler.NewAdminHandler()
+	compressionAdminHandler := handler.NewCompressionAdminHandler()
 	admin := app.Group("/api/admin")
 	adminHandler.RegisterRoutes(admin)
+	compressionAdminHandler.RegisterRoutes(admin)
 
 	// API 路由（包括 OpenAI 兼容接口）
 	apiHandler := handler.NewAPIHandler()
