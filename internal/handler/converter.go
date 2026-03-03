@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"github.com/gemone/model-router/internal/model"
 )
 
@@ -128,41 +130,12 @@ func ConvertOpenAIToAnthropic(resp *model.ChatCompletionResponse) *AnthropicResp
 // Returns "anthropic" for /api/claude/... or /api/anthropic/...
 func GetAPIFormatFromPath(path string) APIFormat {
 	// Check for Anthropic/Claude format
-	if containsFormat(path, "claude") || containsFormat(path, "anthropic") {
-		return APIFormatAnthropic
+	segments := strings.Split(path, "/")
+	for _, seg := range segments {
+		if seg == "claude" || seg == "anthropic" {
+			return APIFormatAnthropic
+		}
 	}
 	// Default to OpenAI format
 	return APIFormatOpenAI
-}
-
-// containsFormat checks if the path contains a specific format segment
-func containsFormat(path, format string) bool {
-	// Simple path segment matching
-	segments := splitPath(path)
-	for _, seg := range segments {
-		if seg == format {
-			return true
-		}
-	}
-	return false
-}
-
-// splitPath splits a path into segments
-func splitPath(path string) []string {
-	segments := make([]string, 0)
-	current := ""
-	for _, ch := range path {
-		if ch == '/' {
-			if current != "" {
-				segments = append(segments, current)
-				current = ""
-			}
-		} else {
-			current += string(ch)
-		}
-	}
-	if current != "" {
-		segments = append(segments, current)
-	}
-	return segments
 }

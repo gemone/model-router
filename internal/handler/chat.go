@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"time"
 
@@ -58,8 +56,11 @@ func (h *ChatHandler) HandleChatCompletions(c *fiber.Ctx) error {
 		return h.errorResponse(c, http.StatusBadRequest, "invalid_request_body", err.Error())
 	}
 
+	// Check if request contains image content
+	hasImage := model.HasImageContent(req.Messages)
+
 	// Route to appropriate provider/model
-	routeResult, err := h.profileRouter.Route(c.Context(), req.Model)
+	routeResult, err := h.profileRouter.Route(c.Context(), req.Model, hasImage)
 	if err != nil {
 		return h.errorResponse(c, http.StatusServiceUnavailable, "no_route", err.Error())
 	}
@@ -94,6 +95,11 @@ func (h *ChatHandler) handleNonStreaming(
 	requestID string,
 	start time.Time,
 ) error {
+	// Use OriginalName for the actual API call if available
+	if routeResult.Model != nil && routeResult.Model.OriginalName != "" {
+		req.Model = routeResult.Model.OriginalName
+	}
+
 	// Call adapter for response
 	resp, err := routeResult.Adapter.ChatCompletion(c.Context(), req)
 	if err != nil {
@@ -117,6 +123,11 @@ func (h *ChatHandler) handleStreaming(
 	requestID string,
 	start time.Time,
 ) error {
+	// Use OriginalName for the actual API call if available
+	if routeResult.Model != nil && routeResult.Model.OriginalName != "" {
+		req.Model = routeResult.Model.OriginalName
+	}
+
 	// Set SSE headers
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
@@ -201,96 +212,4 @@ func (h *ChatHandler) errorResponse(c *fiber.Ctx, status int, errorCode, message
 
 	c.Set("Content-Type", "application/json")
 	return c.Status(status).JSON(resp)
-}
-
-// parseStreamChunk parses a stream chunk for SSE forwarding.
-func (h *ChatHandler) parseStreamChunk(chunk []byte) (*model.ChatCompletionStreamResponse, error) {
-	var resp model.ChatCompletionStreamResponse
-	if err := json.Unmarshal(chunk, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
-// validateRequest validates the chat completion request.
-func (h *ChatHandler) validateRequest(req *model.ChatCompletionRequest) error {
-	if req.Model == "" {
-		return fiber.NewError(http.StatusBadRequest, "model is required")
-	}
-
-	if len(req.Messages) == 0 {
-		return fiber.NewError(http.StatusBadRequest, "messages array is required and cannot be empty")
-	}
-
-	// Validate message roles
-	validRoles := map[string]bool{
-		"system": true, "user": true, "assistant": true, "tool": true,
-	}
-
-	for i, msg := range req.Messages {
-		if !validRoles[msg.Role] {
-			return fiber.NewError(http.StatusBadRequest,
-				"invalid role '"+msg.Role+"' in messages["+string(rune(i))+"]")
-		}
-
-		// Validate content is present for non-tool messages
-		if msg.Role != "tool" && msg.Content == nil && len(msg.ToolCalls) == 0 {
-			return fiber.NewError(http.StatusBadRequest,
-				"messages["+string(rune(i))+"] must have content or tool_calls")
-		}
-	}
-
-	// Validate tool_choice if provided
-	if req.ToolChoice != nil {
-		switch v := req.ToolChoice.(type) {
-		case string:
-			if v != "none" && v != "auto" && v != "required" {
-				return fiber.NewError(http.StatusBadRequest,
-					"tool_choice must be 'none', 'auto', 'required', or an object")
-			}
-		case map[string]interface{}:
-			if _, ok := v["type"]; !ok {
-				return fiber.NewError(http.StatusBadRequest,
-					"tool_choice object must have 'type' field")
-			}
-		default:
-			return fiber.NewError(http.StatusBadRequest,
-				"tool_choice must be a string or object")
-		}
-	}
-
-	// Validate stop sequences
-	if req.Stop != nil {
-		switch v := req.Stop.(type) {
-		case string:
-			if v == "" {
-				return fiber.NewError(http.StatusBadRequest, "stop string cannot be empty")
-			}
-		case []interface{}:
-			for _, s := range v {
-				if str, ok := s.(string); ok {
-					if str == "" {
-						return fiber.NewError(http.StatusBadRequest, "stop strings cannot be empty")
-					}
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// copyReader creates a copy of the request body for parsing.
-func copyReader(r io.Reader) ([]byte, error) {
-	return io.ReadAll(r)
-}
-
-// bufferedReader wraps bytes.Buffer for io.Reader interface.
-type bufferedReader struct {
-	*bytes.Buffer
-}
-
-// NewBufferedReader creates a new buffered reader from byte slice.
-func newBufferedReader(data []byte) io.Reader {
-	return &bufferedReader{Buffer: bytes.NewBuffer(data)}
 }

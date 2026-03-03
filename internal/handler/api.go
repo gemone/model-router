@@ -4,16 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/gemone/model-router/internal/config"
+	"github.com/gemone/model-router/internal/middleware"
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/service"
+	"github.com/gemone/model-router/internal/tokenizer"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+)
+
+var (
+	// validProfileNamePattern validates profile names: alphanumeric, underscore, dash, 1-64 chars
+	validProfileNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 )
 
 // APIHandler API 处理器
@@ -21,16 +27,43 @@ type APIHandler struct {
 	profileManager *service.ProfileManager
 	stats          *service.StatsCollector
 	debug          bool
+	// Shutdown context for graceful termination of background goroutines
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 // NewAPIHandler 创建 API 处理器
 func NewAPIHandler() *APIHandler {
 	cfg := config.Get()
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	return &APIHandler{
 		profileManager: service.GetProfileManager(),
 		stats:          service.GetStatsCollector(),
 		debug:          cfg.LogLevel == "debug",
+		shutdownCtx:    shutdownCtx,
+		shutdownCancel: shutdownCancel,
 	}
+}
+
+// Shutdown signals all background goroutines to stop
+func (h *APIHandler) Shutdown() {
+	if h.shutdownCancel != nil {
+		h.shutdownCancel()
+	}
+}
+
+// validateProfilePath validates that a profile path parameter is safe
+func validateProfilePath(profilePath string) error {
+	if profilePath == "" {
+		return nil // Empty is valid (for default profile)
+	}
+	if len(profilePath) > 64 {
+		return fmt.Errorf("profile name too long (max 64 characters)")
+	}
+	if !validProfileNamePattern.MatchString(profilePath) {
+		return fmt.Errorf("profile name contains invalid characters (only alphanumeric, underscore, and dash allowed)")
+	}
+	return nil
 }
 
 // RegisterRoutes 注册路由
@@ -65,6 +98,9 @@ func (h *APIHandler) RegisterRoutes(app *fiber.App) {
 // handleChatCompletion 处理聊天完成请求
 func (h *APIHandler) handleChatCompletion(c *fiber.Ctx) error {
 	profilePath := c.Params("profile")
+	if err := validateProfilePath(profilePath); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 	return h.processChatCompletion(c, profilePath)
 }
 
@@ -96,15 +132,20 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	// 使用 OriginalName 进行实际的 API 调用
+	if routeResult.Model != nil && routeResult.Model.OriginalName != "" {
+		req.Model = routeResult.Model.OriginalName
+	}
+
 	// Check if this is a composite model and validate streaming support
 	if compositeModel, ok := profile.GetCompositeModel(req.Model); ok && compositeModel.Enabled {
 		// Streaming is not supported for parallel-synthesize mode
 		if req.Stream && compositeModel.Strategy == model.CompositeStrategyParallel &&
 			compositeModel.Aggregation != nil && compositeModel.Aggregation.Method == model.AggregationMethodSynthesize {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-				"error": "streaming is not supported for composite models with parallel-synthesize aggregation",
-				"model": req.Model,
-				"strategy": string(compositeModel.Strategy),
+				"error":       "streaming is not supported for composite models with parallel-synthesize aggregation",
+				"model":       req.Model,
+				"strategy":    string(compositeModel.Strategy),
 				"aggregation": string(compositeModel.Aggregation.Method),
 			})
 		}
@@ -134,13 +175,15 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 		compressedMessages, metadata, err := profile.ApplyCompression(c.Context(), session, profile.Profile.MaxContextWindow, req.CompressionModelGroup)
 		if err != nil {
 			// Log compression error but continue with original messages
-			fmt.Printf("Compression error: %v\n", err)
+			middleware.ErrorLog("Compression error: %v", err)
+			c.Set("X-Compression-Status", "failed")
 		} else {
 			req.Messages = compressedMessages
 			compressionMetadata = metadata
 			if h.debug {
-				fmt.Printf("Compression applied: %d -> %d messages\n",
-					originalCount, len(compressedMessages))
+				ratio := float64(len(compressedMessages)) / float64(originalCount)
+				fmt.Printf("Compression applied: ratio=%.2f (%d messages processed)\n",
+					ratio, originalCount)
 			}
 		}
 	}
@@ -157,7 +200,7 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 
 		stream, chErr := routeResult.Adapter.ChatCompletionStream(c.Context(), &req)
 		if chErr != nil {
-			go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, chErr.Error())
+			go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, chErr.Error(), nil)
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": chErr.Error()})
 		}
 
@@ -168,13 +211,13 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 			c.Write([]byte("\n\n"))
 		}
 		c.Write([]byte("data: [DONE]\n\n"))
-		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), true, "")
+		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), true, "", nil)
 		return nil
 	}
 
 	result, streamErr = routeResult.Adapter.ChatCompletion(c.Context(), &req)
 	if streamErr != nil {
-		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, streamErr.Error())
+		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, streamErr.Error(), nil)
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": streamErr.Error()})
 	}
 
@@ -183,13 +226,16 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 		result.Compression = compressionMetadata
 	}
 
-	go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), true, "")
+	go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), true, "", &result.Usage)
 	return c.JSON(result)
 }
 
 // handleEmbeddings 处理嵌入请求
 func (h *APIHandler) handleEmbeddings(c *fiber.Ctx) error {
 	profilePath := c.Params("profile")
+	if err := validateProfilePath(profilePath); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 	return h.processEmbeddings(c, profilePath)
 }
 
@@ -215,6 +261,11 @@ func (h *APIHandler) processEmbeddings(c *fiber.Ctx, profilePath string) error {
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	// 使用 OriginalName 进行实际的 API 调用
+	if routeResult.Model != nil && routeResult.Model.OriginalName != "" {
+		req.Model = routeResult.Model.OriginalName
+	}
+
 	result, err := routeResult.Adapter.Embeddings(c.Context(), &req)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -226,6 +277,9 @@ func (h *APIHandler) processEmbeddings(c *fiber.Ctx, profilePath string) error {
 // handleListModels 处理模型列表请求
 func (h *APIHandler) handleListModels(c *fiber.Ctx) error {
 	profilePath := c.Params("profile")
+	if err := validateProfilePath(profilePath); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 	return h.processListModels(c, profilePath)
 }
 
@@ -265,6 +319,9 @@ func (h *APIHandler) handleChatCompletionWithFormat(c *fiber.Ctx) error {
 	// 从路径中提取格式类型
 	apiFormat := GetAPIFormatFromPath(c.Path())
 	profilePath := c.Params("profile")
+	if err := validateProfilePath(profilePath); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	// 对于 Anthropic/Claude 格式，需要转换请求
 	if apiFormat == APIFormatAnthropic || apiFormat == APIFormatClaude {
@@ -273,11 +330,6 @@ func (h *APIHandler) handleChatCompletionWithFormat(c *fiber.Ctx) error {
 
 	// 默认使用 OpenAI 格式处理
 	return h.processChatCompletion(c, profilePath)
-}
-
-// handleClaudeMessages 处理 Claude 格式消息 (已弃用，保留向后兼容)
-func (h *APIHandler) handleClaudeMessages(c *fiber.Ctx) error {
-	return h.handleChatCompletionWithFormat(c)
 }
 
 // processAnthropicRequest 处理 Anthropic/Claude 格式请求
@@ -309,6 +361,11 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 	routeResult, err := profile.Route(c.Context(), openAIReq.Model)
 	if err != nil {
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// 使用 OriginalName 进行实际的 API 调用
+	if routeResult.Model != nil && routeResult.Model.OriginalName != "" {
+		openAIReq.Model = routeResult.Model.OriginalName
 	}
 
 	// 检查是否是复合模型并验证流式支持
@@ -343,7 +400,8 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 		}
 		compressedMessages, metadata, err := profile.ApplyCompression(c.Context(), session, profile.Profile.MaxContextWindow, openAIReq.CompressionModelGroup)
 		if err != nil {
-			fmt.Printf("Compression error: %v\n", err)
+			middleware.ErrorLog("Compression error: %v", err)
+			c.Set("X-Compression-Status", "failed")
 		} else {
 			openAIReq.Messages = compressedMessages
 			compressionMetadata = metadata
@@ -364,7 +422,7 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 
 		stream, chErr := routeResult.Adapter.ChatCompletionStream(c.Context(), openAIReq)
 		if chErr != nil {
-			go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), false, chErr.Error())
+			go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), false, chErr.Error(), nil)
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": chErr.Error()})
 		}
 
@@ -378,13 +436,13 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 			c.Write([]byte("\n\n"))
 		}
 		c.Write([]byte("data: [DONE]\n\n"))
-		go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), true, "")
+		go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), true, "", nil)
 		return nil
 	}
 
 	result, err = routeResult.Adapter.ChatCompletion(c.Context(), openAIReq)
 	if err != nil {
-		go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), false, err.Error())
+		go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), false, err.Error(), nil)
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -397,14 +455,23 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 		// 可以考虑在响应头中添加元数据信息
 	}
 
-	go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), true, "")
+	go h.recordRequestLog(requestID, routeResult, openAIReq.Model, time.Since(start), true, "", &result.Usage)
 	return c.JSON(anthropicResp)
 }
 
 // recordRequestLog 记录请求日志
-func (h *APIHandler) recordRequestLog(requestID string, routeResult *service.RouteResult, modelName string, latency time.Duration, success bool, errMsg string) {
+func (h *APIHandler) recordRequestLog(requestID string, routeResult *service.RouteResult, modelName string, latency time.Duration, success bool, errMsg string, usage *model.Usage) {
 	if !config.Get().EnableStats {
 		return
+	}
+
+	// Check if shutdown has been signaled
+	select {
+	case <-h.shutdownCtx.Done():
+		// Server is shutting down, skip logging to avoid blocking
+		return
+	default:
+		// Continue processing
 	}
 
 	status := "success"
@@ -419,39 +486,17 @@ func (h *APIHandler) recordRequestLog(requestID string, routeResult *service.Rou
 		Status:       status,
 		Latency:      latency.Milliseconds(),
 		ErrorMessage: errMsg,
+		CreatedAt:    time.Now(),
+	}
+
+	// 设置 token 使用量
+	if usage != nil {
+		requestLog.PromptTokens = usage.PromptTokens
+		requestLog.CompletionTokens = usage.CompletionTokens
+		requestLog.TotalTokens = usage.TotalTokens
 	}
 
 	h.stats.RecordRequest(requestLog)
-}
-
-// 兼容函数：透传到上游服务
-func (h *APIHandler) proxyToUpstream(c *fiber.Ctx, targetURL string, body []byte) error {
-	req, err := http.NewRequestWithContext(c.Context(), "POST", targetURL, strings.NewReader(string(body)))
-	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	req.Header = make(http.Header)
-	c.Request().Header.VisitAll(func(key, value []byte) {
-		req.Header.Add(string(key), string(value))
-	})
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return c.Status(http.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
-	}
-	defer resp.Body.Close()
-
-	for k, v := range resp.Header {
-		for _, vv := range v {
-			c.Response().Header.Add(k, vv)
-		}
-	}
-	c.Response().SetStatusCode(resp.StatusCode)
-
-	io.Copy(c.Response().BodyWriter(), resp.Body)
-	return nil
 }
 
 // shouldApplyCompression 智能判断是否需要压缩
@@ -485,38 +530,7 @@ func (h *APIHandler) shouldApplyCompression(profile *model.Profile, targetModel 
 
 // estimateMessagesTokens 估算消息列表的 token 数量
 func estimateMessagesTokens(messages []model.Message) int {
-	total := 0
-	for i := range messages {
-		total += estimateMessageTokens(&messages[i])
-	}
-	return total
-}
-
-// estimateMessageTokens 估算单条消息的 token 数量
-func estimateMessageTokens(msg *model.Message) int {
-	content := contentToString(msg.Content)
-	// 粗略估算：英文约 4 字符/token，中文约 2 字符/token
-	// 这里使用保守估计 4 字符/token
-	return len(content)/4 + 10 // 10 tokens 消息元数据开销
-}
-
-// contentToString 将消息内容转换为字符串
-func contentToString(content interface{}) string {
-	switch v := content.(type) {
-	case string:
-		return v
-	case []model.ContentPart:
-		var sb strings.Builder
-		for _, part := range v {
-			if part.Type == "text" {
-				sb.WriteString(part.Text)
-				sb.WriteString(" ")
-			}
-		}
-		return sb.String()
-	default:
-		return fmt.Sprintf("%v", content)
-	}
+	return tokenizer.CountTokensForMessages(messages)
 }
 
 // validateCompressionGroup validates that a compression group exists and is usable

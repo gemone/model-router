@@ -106,10 +106,8 @@ func (h *CompositeAdminHandler) UpsertCompositeModel(c *fiber.Ctx) error {
 		}
 	}
 
-	// TODO: Invalidate composite selector cache when implemented
-	// if profile.CompositeSelector != nil {
-	// 	_ = profile.CompositeSelector.InvalidateCache(c.Context())
-	// }
+	// Refresh profile to pick up composite model changes
+	_ = h.profileManager.Refresh(profileID)
 
 	return c.JSON(req)
 }
@@ -134,10 +132,8 @@ func (h *CompositeAdminHandler) DeleteCompositeModel(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete composite model"})
 	}
 
-	// TODO: Invalidate composite selector cache when implemented
-	// if profile.CompositeSelector != nil {
-	// 	_ = profile.CompositeSelector.InvalidateCache(c.Context())
-	// }
+	// Refresh profile to pick up composite model changes
+	_ = h.profileManager.Refresh(profileID)
 
 	return c.SendStatus(http.StatusNoContent)
 }
