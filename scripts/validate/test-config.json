@@ -1,0 +1,12 @@
+{
+  "base_url": "http://localhost:8080",
+  "frontend_url": "http://localhost:5173",
+  "ollama_host": "http://localhost:11434",
+  "test_models": ["llama3", "mistral", "qwen2"],
+  "test_prompts": {
+    "simple": "What is 2+2?",
+    "code": "Write a Python hello world",
+    "reasoning": "Explain why the sky is blue"
+  },
+  "timeout_seconds": 30
+}

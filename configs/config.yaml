@@ -1,0 +1,62 @@
+# Model Router Configuration
+# Full refactor for multi-model 1M+ context simulation
+
+server:
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 120s
+
+sonic:
+  enabled: true
+  use_fastest: true  # Use fastest SIMD variant available
+  fallback_to_standard: false
+
+compression:
+  strategies:
+    - sliding_window
+    - semantic_clustering
+    - knowledge_graph
+    - vector_dedup
+  max_loss_rate: 0.15
+  token_budget:
+    sliding_window: 0.20
+    semantic_clustering: 0.15
+    knowledge_graph: 0.15
+    vector_dedup: 0.05
+
+ensemble:
+  max_parallel: 5
+  max_retries: 3
+  retry_backoff_ms: [100, 500, 2000]
+  synthesis_model: "gpt-4-turbo"
+
+cache:
+  l1:
+    enabled: true
+    ttl: 60s
+    max_size: 1GB
+  l2:
+    enabled: true
+    ttl: 300s
+    url: "dragonfly://localhost:6379"  # DragonflyDB (Redis-compatible)
+  l3:
+    enabled: false
+    ttl: 3600s
+
+session:
+  cross_session_memory: true
+  retention_days: 30
+  compression_interval: 10
+
+vector:
+  store: "qdrant"
+  url: "http://localhost:6334"  # Qdrant endpoint
+  collection: "context_vectors"
+  hnsw:
+    m: 16
+    ef_construction: 200
+  dimensions: 1536
+
+plugins:
+  directory: "./pkg/plugins"
+  hot_reload: true
