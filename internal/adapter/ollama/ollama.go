@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gemone/model-router/internal/adapter"
+	"github.com/gemone/model-router/internal/middleware"
 	"github.com/gemone/model-router/internal/model"
 )
 
@@ -47,29 +48,45 @@ func (o *OllamaAdapter) GetRequestHeaders() map[string]string {
 
 // ChatCompletion 执行聊天完成请求
 func (o *OllamaAdapter) ChatCompletion(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
+	start := time.Now()
+	providerName := "Ollama"
+	if o.GetProvider() != nil && o.GetProvider().Name != "" {
+		providerName = o.GetProvider().Name
+	}
+
 	ollamaReq := o.convertRequest(req)
+
+	// Debug log request
+	middleware.LogAdapterRequest(providerName, req.Model, o.GetBaseURL()+"/api/chat", ollamaReq)
 
 	resp, err := o.DoRequest(ctx, "POST", "/api/chat", ollamaReq)
 	if err != nil {
+		middleware.LogAdapterResponse(providerName, req.Model, 0, map[string]string{"error": err.Error()}, time.Since(start))
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		middleware.LogAdapterResponse(providerName, req.Model, resp.StatusCode, map[string]string{"error": err.Error()}, time.Since(start))
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		middleware.LogAdapterResponse(providerName, req.Model, resp.StatusCode, map[string]string{"error": string(body)}, time.Since(start))
 		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var ollamaResp ollamaResponse
 	if err := json.Unmarshal(body, &ollamaResp); err != nil {
+		middleware.LogAdapterResponse(providerName, req.Model, resp.StatusCode, map[string]string{"error": err.Error()}, time.Since(start))
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return o.convertResponse(&ollamaResp, req.Model), nil
+	result := o.convertResponse(&ollamaResp, req.Model)
+	middleware.LogAdapterResponse(providerName, req.Model, resp.StatusCode, result, time.Since(start))
+
+	return result, nil
 }
 
 // ChatCompletionStream 执行流式聊天完成请求

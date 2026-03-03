@@ -21,9 +21,6 @@ type Adapter interface {
 	// ChatCompletion 执行聊天完成请求
 	ChatCompletion(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error)
 
-	// ChatCompletions 执行聊天完成请求（与ChatCompletion相同，用于接口兼容）
-	ChatCompletions(ctx context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error)
-
 	// ChatCompletionStream 执行流式聊天完成请求
 	ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error)
 
@@ -54,12 +51,12 @@ type Adapter interface {
 
 // Type aliases for compatibility with existing code
 type (
-	ChatCompletionRequest       = model.ChatCompletionRequest
-	ChatCompletionResponse      = model.ChatCompletionResponse
+	ChatCompletionRequest        = model.ChatCompletionRequest
+	ChatCompletionResponse       = model.ChatCompletionResponse
 	ChatCompletionStreamResponse = model.ChatCompletionStreamResponse
-	EmbeddingRequest            = model.EmbeddingRequest
-	EmbeddingResponse           = model.EmbeddingResponse
-	ListModelsResponse          = model.ListModelsResponse
+	EmbeddingRequest             = model.EmbeddingRequest
+	EmbeddingResponse            = model.EmbeddingResponse
+	ListModelsResponse           = model.ListModelsResponse
 )
 
 // AdapterFactory 适配器工厂
@@ -126,16 +123,6 @@ func NewProviderError(providerType model.ProviderType, message string, err error
 	return &ProviderError{
 		ProviderType: providerType,
 		Message:      message,
-		Err:          err,
-	}
-}
-
-// NewProviderErrorWithStatus creates a new provider error with HTTP status code
-func NewProviderErrorWithStatus(providerType model.ProviderType, message string, statusCode int, err error) *ProviderError {
-	return &ProviderError{
-		ProviderType: providerType,
-		Message:      message,
-		StatusCode:   statusCode,
 		Err:          err,
 	}
 }

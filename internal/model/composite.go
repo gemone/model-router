@@ -10,7 +10,7 @@ import (
 // CompositeAutoModel 定义组合模型
 type CompositeAutoModel struct {
 	ID        string           `json:"id" gorm:"primaryKey;size:255"`
-	ProfileID string           `json:"profile_id" gorm:"index:idx_composite_auto_model_profile;size:255"` // TODO: Remove in Phase 4
+	ProfileID string           `json:"profile_id" gorm:"index:idx_composite_auto_model_profile;size:255"` // Deprecated: Will be removed in v4 when profile refactoring is complete
 	Name      string           `json:"name" gorm:"index:idx_composite_auto_model_name;size:255"`
 	Models    []ModelReference `json:"models" gorm:"serializer:json"`
 	Priority  int              `json:"priority" gorm:"default:1"`

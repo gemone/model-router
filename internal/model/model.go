@@ -18,6 +18,7 @@ type Model struct {
 	InputPrice     float64   `json:"input_price" gorm:"default:0"`         // 输入价格（每1K token）
 	OutputPrice    float64   `json:"output_price" gorm:"default:0"`        // 输出价格（每1K token）
 	SkipCompression bool     `json:"skip_compression" gorm:"default:false"` // 跳过压缩（如 1M+ 模型）
+	RateLimit      int       `json:"rate_limit" gorm:"default:0"`         // 每分钟请求限制，0表示使用Provider配置或无限制
 
 	// 场景路由配置 (scene 策略)
 	Scene                string `json:"scene"` // 场景标签: default/background/think/longContext

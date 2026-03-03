@@ -81,11 +81,6 @@ func (b *BaseAdapter) ChatCompletion(ctx context.Context, req *model.ChatComplet
 	return nil, fmt.Errorf("not implemented")
 }
 
-// ChatCompletions 默认实现，调用ChatCompletion
-func (b *BaseAdapter) ChatCompletions(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
-	return b.ChatCompletion(ctx, req)
-}
-
 // ChatCompletionStream 默认实现（子类需要覆盖）
 func (b *BaseAdapter) ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error) {
 	return nil, fmt.Errorf("not implemented")
@@ -134,6 +129,11 @@ func (b *BaseAdapter) GetHTTPClient() *http.Client {
 // GetAPIKey 获取API Key
 func (b *BaseAdapter) GetAPIKey() string {
 	return b.apiKey
+}
+
+// GetProvider 获取Provider
+func (b *BaseAdapter) GetProvider() *model.Provider {
+	return b.provider
 }
 
 // DecryptAPIKey 解密API Key

@@ -86,8 +86,8 @@ func TestProfileRouter_GetHealthScore(t *testing.T) {
 func TestProfileRouter_RouteWithFallback_NoFallbackNeeded(t *testing.T) {
 	router := NewProfileRouter()
 
-	// Test with no last error
-	result, err := router.RouteWithFallback(context.Background(), "nonexistent-model", nil)
+	// Test with no last error, no image
+	result, err := router.RouteWithFallback(context.Background(), "nonexistent-model", nil, false)
 	// Should fail because no profiles are loaded
 	assert.Error(t, err)
 	assert.Nil(t, result)

@@ -6,23 +6,17 @@ import (
 	"unicode"
 
 	"github.com/gemone/model-router/internal/model"
+	"github.com/gemone/model-router/internal/tokenizer"
 )
 
 // EstimateMessagesTokens estimates the total token count for a list of messages
 func EstimateMessagesTokens(messages []model.Message) int {
-	total := 0
-	for i := range messages {
-		total += EstimateMessageTokens(&messages[i])
-	}
-	return total
+	return tokenizer.CountTokensForMessages(messages)
 }
 
 // EstimateMessageTokens estimates the token count for a single message
 func EstimateMessageTokens(msg *model.Message) int {
-	content := ContentToString(msg.Content)
-	// Rough estimation: English ~4 chars/token, Chinese ~2 chars/token
-	// Conservative estimate of 4 chars/token
-	return len(content)/4 + 10 // 10 tokens for message metadata overhead
+	return tokenizer.CountTokensForMessage(msg)
 }
 
 // ContentToString converts message content to string

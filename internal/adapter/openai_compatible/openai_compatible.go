@@ -79,7 +79,12 @@ func (o *OpenAICompatibleAdapter) SetCustomHeader(key, value string) {
 
 // ChatCompletion 执行聊天完成请求
 func (o *OpenAICompatibleAdapter) ChatCompletion(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
-	resp, err := o.DoRequest(ctx, "POST", "/v1/chat/completions", req)
+	// 使用自定义路径，默认为 /v1/chat/completions
+	chatPath := o.GetProvider().ChatPath
+	if chatPath == "" {
+		chatPath = "/v1/chat/completions"
+	}
+	resp, err := o.DoRequest(ctx, "POST", chatPath, req)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +115,12 @@ func (o *OpenAICompatibleAdapter) ChatCompletion(ctx context.Context, req *model
 func (o *OpenAICompatibleAdapter) ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error) {
 	req.Stream = true
 
-	resp, err := o.DoRequest(ctx, "POST", "/v1/chat/completions", req)
+	// 使用自定义路径，默认为 /v1/chat/completions
+	chatPath := o.GetProvider().ChatPath
+	if chatPath == "" {
+		chatPath = "/v1/chat/completions"
+	}
+	resp, err := o.DoRequest(ctx, "POST", chatPath, req)
 	if err != nil {
 		return nil, err
 	}

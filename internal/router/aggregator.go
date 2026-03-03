@@ -10,6 +10,7 @@ import (
 	"github.com/gemone/model-router/internal/compression"
 	"github.com/gemone/model-router/internal/ensemble"
 	"github.com/gemone/model-router/internal/model"
+	"github.com/gemone/model-router/internal/tokenizer"
 )
 
 // Aggregator defines the interface for aggregating responses from multiple backends
@@ -137,7 +138,7 @@ func (a *SynthesisAggregator) Aggregate(ctx context.Context, req interface{}, ba
 			defer cancel()
 
 			// Call the backend
-			resp, err := b.Adapter.ChatCompletions(backendCtx, chatReq)
+			resp, err := b.Adapter.ChatCompletion(backendCtx, chatReq)
 			results[index] = responseResult{Response: resp, Error: err}
 		}(i, backend)
 	}
@@ -381,20 +382,5 @@ func estimateTokens(resp interface{}) int {
 
 // estimateTokensInRequest estimates the number of tokens in a request
 func estimateTokensInRequest(req *model.ChatCompletionRequest) int {
-	total := 0
-	for _, msg := range req.Messages {
-		content := ""
-		switch v := msg.Content.(type) {
-		case string:
-			content = v
-		case []model.ContentPart:
-			for _, part := range v {
-				if part.Type == "text" {
-					content += part.Text + " "
-				}
-			}
-		}
-		total += len(content)/4 + 10 // Rough estimate
-	}
-	return total
+	return tokenizer.CountTokensForMessages(req.Messages)
 }

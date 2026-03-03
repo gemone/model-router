@@ -216,7 +216,7 @@ func (r *ProfileRouter) selectByPriority(profiles []*Profile) *Profile {
 }
 
 // Route determines the best provider and model for a given request.
-func (r *ProfileRouter) Route(ctx context.Context, modelName string) (*RouteResult, error) {
+func (r *ProfileRouter) Route(ctx context.Context, modelName string, hasImage bool) (*RouteResult, error) {
 	profile, err := r.MatchProfile(modelName)
 	if err != nil {
 		return nil, err
@@ -226,6 +226,17 @@ func (r *ProfileRouter) Route(ctx context.Context, modelName string) (*RouteResu
 	if models, ok := profile.models[modelName]; ok && len(models) > 0 {
 		selected := r.selectBestModel(profile, models)
 		if selected != nil {
+			// Check if image routing is needed
+			if hasImage && !selected.SupportsVision {
+				// Try to find an image-capable route
+				imageResult, imageErr := r.routeToImageCapableModel(ctx, profile, modelName)
+				if imageErr == nil && imageResult != nil {
+					return imageResult, nil
+				}
+				// If no image route found, return error
+				return nil, fmt.Errorf("model %s does not support images and no image-capable route configured for profile", modelName)
+			}
+
 			provider := profile.providers[selected.ProviderID]
 			adapt := profile.adapterMap[selected.ProviderID]
 			if provider != nil && adapt != nil && provider.Enabled {
@@ -242,20 +253,65 @@ func (r *ProfileRouter) Route(ctx context.Context, modelName string) (*RouteResu
 
 	// 2. Route-based model lookup (via RouteIDs, using weight and priority)
 	if len(profile.routes) > 0 {
-		result, err := r.routeViaRoutes(ctx, profile, modelName)
+		result, err := r.routeViaRoutesWithImageCheck(ctx, profile, modelName, hasImage)
 		if err == nil && result != nil {
 			return result, nil
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	return nil, fmt.Errorf("no available route for model: %s", modelName)
 }
 
-// routeViaRoutes attempts to find a model through configured routes
-func (r *ProfileRouter) routeViaRoutes(ctx context.Context, profile *Profile, modelName string) (*RouteResult, error) {
+// routeToImageCapableModel finds an image-capable model via ContentType=image routes
+func (r *ProfileRouter) routeToImageCapableModel(ctx context.Context, profile *Profile, modelName string) (*RouteResult, error) {
 	routeService := service.GetRouteService()
 
+	// Find routes with ContentType=image
 	for routeID, routeInstance := range profile.routes {
+		if routeInstance.Route.ContentType == model.ContentTypeImage {
+			// Use this route to select an image-capable model
+			selectedEntry, err := routeService.SelectModelFromRoute(ctx, routeID)
+			if err != nil {
+				continue
+			}
+
+			if selectedEntry != nil && selectedEntry.Model != nil && selectedEntry.Model.SupportsVision {
+				provider := profile.providers[selectedEntry.Model.ProviderID]
+				adapt := profile.adapterMap[selectedEntry.Model.ProviderID]
+				if provider != nil && adapt != nil && provider.Enabled {
+					return &RouteResult{
+						Provider:   provider,
+						Model:      selectedEntry.Model,
+						Adapter:    adapt,
+						Profile:    profile.Profile,
+						IsFallback: false,
+					}, nil
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no image-capable route found")
+}
+
+// routeViaRoutesWithImageCheck attempts to find a model through configured routes with image support check
+func (r *ProfileRouter) routeViaRoutesWithImageCheck(ctx context.Context, profile *Profile, modelName string, hasImage bool) (*RouteResult, error) {
+	routeService := service.GetRouteService()
+
+	// First, try to find the model in routes with matching content type
+	for routeID, routeInstance := range profile.routes {
+		// Skip image-only routes if this is a text-only request
+		if !hasImage && routeInstance.Route.ContentType == model.ContentTypeImage {
+			continue
+		}
+		// Skip text-only routes if this is an image request
+		if hasImage && routeInstance.Route.ContentType == model.ContentTypeText {
+			continue
+		}
+
 		// Check if this route contains the requested model
 		for _, entry := range routeInstance.ModelEntries {
 			if entry.Enabled && entry.Model != nil && entry.Model.Name == modelName {
@@ -266,6 +322,16 @@ func (r *ProfileRouter) routeViaRoutes(ctx context.Context, profile *Profile, mo
 				}
 
 				if selectedEntry != nil && selectedEntry.Model != nil {
+					// Check vision capability for image requests
+					if hasImage && !selectedEntry.Model.SupportsVision {
+						// Try to find an image-capable route
+						imageResult, imageErr := r.routeToImageCapableModel(ctx, profile, modelName)
+						if imageErr == nil && imageResult != nil {
+							return imageResult, nil
+						}
+						return nil, fmt.Errorf("model %s does not support images and no image-capable route configured for profile", modelName)
+					}
+
 					provider := profile.providers[selectedEntry.Model.ProviderID]
 					adapt := profile.adapterMap[selectedEntry.Model.ProviderID]
 					if provider != nil && adapt != nil && provider.Enabled {
@@ -342,8 +408,8 @@ func (r *ProfileRouter) getHealthScore(providerID, modelName string) float64 {
 }
 
 // RouteWithFallback routes a request with automatic fallback on errors.
-func (r *ProfileRouter) RouteWithFallback(ctx context.Context, modelName string, lastError error) (*RouteResult, error) {
-	result, err := r.Route(ctx, modelName)
+func (r *ProfileRouter) RouteWithFallback(ctx context.Context, modelName string, lastError error, hasImage bool) (*RouteResult, error) {
+	result, err := r.Route(ctx, modelName, hasImage)
 	if err != nil {
 		return nil, err
 	}
