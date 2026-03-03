@@ -8,14 +8,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"log"
 )
 
 var encryptionKey []byte
 
 // InitEncryptionKey 初始化加密密钥
-func InitEncryptionKey(key string) {
+func InitEncryptionKey(key string) error {
 	if key == "" {
-		key = "model-router-default-encryption-key-32bytes"
+		return errors.New("encryption key is required - set ENCRYPTION_KEY environment variable")
 	}
 	// 确保密钥长度为32字节（AES-256）
 	encryptionKey = []byte(key)
@@ -24,15 +25,19 @@ func InitEncryptionKey(key string) {
 		newKey := make([]byte, 32)
 		copy(newKey, encryptionKey)
 		encryptionKey = newKey
+		log.Printf("[INFO] Encryption key padded to 32 bytes for AES-256")
 	} else if len(encryptionKey) > 32 {
+		// 截断到32字节并记录警告
+		log.Printf("[WARN] Encryption key truncated from %d to 32 bytes - only first 32 bytes are used", len(encryptionKey))
 		encryptionKey = encryptionKey[:32]
 	}
+	return nil
 }
 
 // Encrypt 加密数据
 func Encrypt(plaintext string) (string, error) {
 	if encryptionKey == nil {
-		InitEncryptionKey("")
+		return "", errors.New("encryption key not initialized - call InitEncryptionKey first")
 	}
 
 	block, err := aes.NewCipher(encryptionKey)
@@ -57,7 +62,7 @@ func Encrypt(plaintext string) (string, error) {
 // Decrypt 解密数据
 func Decrypt(ciphertext string) (string, error) {
 	if encryptionKey == nil {
-		InitEncryptionKey("")
+		return "", errors.New("encryption key not initialized - call InitEncryptionKey first")
 	}
 
 	data, err := base64.StdEncoding.DecodeString(ciphertext)

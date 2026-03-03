@@ -15,6 +15,11 @@ import (
 	"github.com/gemone/model-router/internal/config"
 )
 
+const (
+	// MaxBodySize is the maximum allowed body size to prevent DoS attacks
+	MaxBodySize = 10 * 1024 * 1024 // 10MB
+)
+
 // Proxy 高性能代理
 type Proxy struct {
 	httpClient *http.Client
@@ -33,7 +38,7 @@ func GetProxy() *Proxy {
 		proxyInstance = &Proxy{
 			debug: cfg.LogLevel == "debug",
 			httpClient: &http.Client{
-				Timeout: 0, // 无超时，由上下文控制
+				Timeout: 30 * time.Second, // Default timeout as fallback, context can override
 				Transport: &http.Transport{
 					MaxIdleConns:        100,
 					MaxIdleConnsPerHost: 100,
@@ -203,9 +208,16 @@ func (p *Proxy) ProxyWithTransform(
 ) error {
 	start := time.Now()
 
-	// 读取请求 body
+	// 读取请求 body - Use http.MaxBytesReader to enforce size limit before reading
+	// This prevents memory exhaustion by rejecting requests that are too large
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBodySize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		defer r.Body.Close()
+		// http.MaxBytesReader returns a specific error message when limit exceeded
+		if err.Error() == "http: request body too large" {
+			return fmt.Errorf("request body exceeds maximum size of %d bytes", MaxBodySize)
+		}
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
 	defer r.Body.Close()
@@ -238,9 +250,15 @@ func (p *Proxy) ProxyWithTransform(
 	}
 	defer resp.Body.Close()
 
-	// 读取响应 body
+	// 读取响应 body - Use http.MaxBytesReader to enforce size limit before reading
+	// This prevents memory exhaustion by rejecting responses that are too large
+	resp.Body = http.MaxBytesReader(w, resp.Body, MaxBodySize)
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		// http.MaxBytesReader returns a specific error message when limit exceeded
+		if err.Error() == "http: request body too large" || err.Error() == "http: response body too large" {
+			return fmt.Errorf("response body exceeds maximum size of %d bytes", MaxBodySize)
+		}
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
@@ -278,38 +296,23 @@ func (p *Proxy) copyWithDebug(w io.Writer, r io.Reader, path string) (int64, err
 	tee := io.TeeReader(r, &buf)
 	n, err := io.Copy(w, tee)
 
-	// 记录响应内容（限制大小）
+	// 记录响应元数据（不记录内容以防止信息泄露）
 	data := buf.Bytes()
-	if len(data) > 1024 {
-		data = data[:1024]
-	}
-	fmt.Printf("[Proxy Debug] Path: %s, Response: %s...\n", path, string(data))
+	fmt.Printf("[Proxy Debug] Path: %s, Response size: %d bytes\n", path, len(data))
 
 	return n, err
 }
 
-// logStreamChunk 记录流式数据块
+// logStreamChunk 记录流式数据块元数据
 func (p *Proxy) logStreamChunk(path string, data []byte) {
-	// 只记录前 256 字节
-	if len(data) > 256 {
-		data = data[:256]
-	}
-	fmt.Printf("[Proxy Debug] Stream chunk: %s\n", string(data))
+	// 只记录大小，不记录内容以防止信息泄露
+	fmt.Printf("[Proxy Debug] Stream chunk size: %d bytes\n", len(data))
 }
 
-// logDebug 记录调试信息
+// logDebug 记录调试信息（只记录元数据，不记录内容）
 func (p *Proxy) logDebug(path string, reqBody, respBody []byte) {
-	const maxLen = 1024
-
-	if len(reqBody) > maxLen {
-		reqBody = reqBody[:maxLen]
-	}
-	if len(respBody) > maxLen {
-		respBody = respBody[:maxLen]
-	}
-
-	fmt.Printf("[Proxy Debug] Path: %s\nRequest: %s\nResponse: %s\n",
-		path, string(reqBody), string(respBody))
+	fmt.Printf("[Proxy Debug] Path: %s, Request size: %d bytes, Response size: %d bytes\n",
+		path, len(reqBody), len(respBody))
 }
 
 // recordMetrics 记录指标
@@ -405,17 +408,4 @@ type ResponseInfo struct {
 	Duration   time.Duration
 	Timestamp  time.Time
 	Model      string // 如果能从路径解析
-}
-
-// ParseModelFromPath 从路径解析模型名称
-func ParseModelFromPath(path string) string {
-	// /v1/chat/completions -> chat
-	// /v1/embeddings -> embeddings
-	if strings.Contains(path, "chat/completions") {
-		return "chat"
-	}
-	if strings.Contains(path, "embeddings") {
-		return "embeddings"
-	}
-	return "unknown"
 }

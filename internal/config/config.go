@@ -17,9 +17,12 @@ type Config struct {
 	DBPath string
 
 	// Security
-	AdminToken   string
-	JWTSecret    string
-	EnableCORS   bool
+	AdminToken     string
+	JWTSecret      string
+	EncryptionKey  string
+	EnableCORS     bool
+	AllowedOrigins string // Comma-separated list of allowed CORS origins
+	EnableHTTPS    bool   // Whether to enable HSTS headers
 
 	// Features
 	EnableStats    bool
@@ -27,7 +30,8 @@ type Config struct {
 	MaxRetries     int
 
 	// Logging
-	LogLevel string
+	LogLevel      string
+	LogBufferSize int // Maximum number of log entries to keep in memory
 }
 
 var cfg *Config
@@ -45,12 +49,16 @@ func Load() *Config {
 		WriteTimeout:   getEnvInt("WRITE_TIMEOUT", 60),
 		DBPath:         getEnv("DB_PATH", ""),
 		AdminToken:     getEnv("ADMIN_TOKEN", ""),
-		JWTSecret:      getEnv("JWT_SECRET", "model-router-secret-key"),
+		JWTSecret:      getEnv("JWT_SECRET", ""),
+		EncryptionKey:  getEnv("ENCRYPTION_KEY", ""),
 		EnableCORS:     getEnvBool("ENABLE_CORS", true),
+		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"),
+		EnableHTTPS:    getEnvBool("ENABLE_HTTPS", false),
 		EnableStats:    getEnvBool("ENABLE_STATS", true),
 		EnableFallback: getEnvBool("ENABLE_FALLBACK", true),
 		MaxRetries:     getEnvInt("MAX_RETRIES", 3),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		LogBufferSize:  clamp(getEnvInt("LOG_BUFFER_SIZE", 1000), 100, 10000),
 	}
 
 	return cfg
@@ -87,4 +95,15 @@ func getEnvBool(key string, defaultValue bool) bool {
 		}
 	}
 	return defaultValue
+}
+
+// clamp returns a value clamped between min and max (inclusive)
+func clamp(value, min, max int) int {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
 }

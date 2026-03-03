@@ -62,26 +62,6 @@ func TestCopyHeaders(t *testing.T) {
 	assert.Empty(t, dst.Get("Connection"))
 }
 
-func TestParseModelFromPath(t *testing.T) {
-	tests := []struct {
-		path     string
-		expected string
-	}{
-		{"/v1/chat/completions", "chat"},
-		{"/v1/embeddings", "embeddings"},
-		{"/api/profile/v1/chat/completions", "chat"},
-		{"/v1/models", "unknown"},
-		{"/v1/images/generations", "unknown"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			result := ParseModelFromPath(tt.path)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestGetContentEncoding(t *testing.T) {
 	tests := []struct {
 		data     []byte

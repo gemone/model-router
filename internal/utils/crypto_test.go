@@ -8,7 +8,8 @@ import (
 )
 
 func TestEncryptDecrypt(t *testing.T) {
-	InitEncryptionKey("test-key-32-bytes-long-for-testing")
+	err := InitEncryptionKey("test-key-32-bytes-long-for-testing")
+	require.NoError(t, err)
 
 	tests := []struct {
 		name      string
@@ -37,7 +38,8 @@ func TestEncryptDecrypt(t *testing.T) {
 }
 
 func TestEncryptUnique(t *testing.T) {
-	InitEncryptionKey("test-key")
+	err := InitEncryptionKey("test-key")
+	require.NoError(t, err)
 
 	// Same plaintext should produce different ciphertexts due to random nonce
 	plaintext := "test"
@@ -55,7 +57,8 @@ func TestEncryptUnique(t *testing.T) {
 }
 
 func TestDecryptInvalid(t *testing.T) {
-	InitEncryptionKey("test-key")
+	err := InitEncryptionKey("test-key")
+	require.NoError(t, err)
 
 	tests := []struct {
 		name        string
