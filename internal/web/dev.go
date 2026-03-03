@@ -8,8 +8,8 @@ import (
 )
 
 // FS 开发模式下返回 nil，使用代理
-func FS() fs.FS {
-	return nil
+func FS() (fs.FS, error) {
+	return nil, nil
 }
 
 // DevMode 返回是否为开发模式
