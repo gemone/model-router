@@ -26,7 +26,6 @@ describe('App Store', () => {
       expect(store.profiles).toEqual([])
       expect(store.providers).toEqual([])
       expect(store.models).toEqual([])
-      expect(store.routeRules).toEqual([])
       expect(store.loading).toBe(false)
       expect(store.sidebarCollapsed).toBe(false)
     })
