@@ -23,6 +23,7 @@ web/node_modules/
 web/dist/
 web/.vite/
 web/*.log
+internal/web/dist/
 
 # IDE
 .idea/
@@ -41,3 +42,13 @@ logs/
 *.log
 
 test_results/
+# Build artifacts
+model-router-new
+model-router-new.bak
+server
+
+# Test screenshots and coverage
+web/*.png
+web/coverage/
+**/TEST_REPORT.md
+**/TEST_REPORT*.md
