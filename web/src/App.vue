@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <el-container v-if="!isLogin">
+    <el-container v-if="!isLogin" class="main-container">
       <el-aside :width="sidebarWidth" class="sidebar">
         <div class="logo">
           <el-icon class="logo-icon"><Connection /></el-icon>
@@ -37,7 +37,7 @@
         </div>
       </el-aside>
 
-      <el-container>
+      <el-container class="content-container">
         <el-header class="header">
           <div class="header-left">
             <breadcrumb />
@@ -148,7 +148,20 @@ if (savedLocale) {
 
 <style scoped>
 .app-container {
-  height: 100vh;
+  width: 100%;
+  height: 100%;
+}
+
+.main-container {
+  width: 100%;
+  height: 100%;
+}
+
+.content-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar {
@@ -156,6 +169,8 @@ if (savedLocale) {
   transition: width 0.3s;
   display: flex;
   flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
 .logo {
@@ -167,6 +182,7 @@ if (savedLocale) {
   font-size: 18px;
   font-weight: bold;
   border-bottom: 1px solid #1f2d3d;
+  flex-shrink: 0;
 }
 
 .logo-icon {
@@ -181,6 +197,7 @@ if (savedLocale) {
 .nav-menu {
   flex: 1;
   border-right: none;
+  overflow-y: auto;
 }
 
 .sidebar-footer {
@@ -189,6 +206,7 @@ if (savedLocale) {
   align-items: center;
   justify-content: center;
   border-top: 1px solid #1f2d3d;
+  flex-shrink: 0;
 }
 
 .collapse-btn {
@@ -207,6 +225,8 @@ if (savedLocale) {
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
+  flex-shrink: 0;
+  height: 60px;
 }
 
 .header-right {
@@ -219,6 +239,7 @@ if (savedLocale) {
   background-color: #f0f2f5;
   padding: 24px;
   overflow-y: auto;
+  flex: 1;
 }
 
 /* Transition animations */

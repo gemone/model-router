@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import Dashboard from '@/views/Dashboard.vue'
 import Profiles from '@/views/Profiles.vue'
 import Providers from '@/views/Providers.vue'
@@ -6,6 +6,7 @@ import Models from '@/views/Models.vue'
 import Routes from '@/views/Routes.vue'
 import Stats from '@/views/Stats.vue'
 import Logs from '@/views/Logs.vue'
+import ServerLogs from '@/views/ServerLogs.vue'
 import Settings from '@/views/Settings.vue'
 
 const routes = [
@@ -19,6 +20,7 @@ const routes = [
     component: Dashboard,
     meta: { title: '仪表盘', icon: 'Odometer' }
   },
+
   {
     path: '/profiles',
     name: 'Profiles',
@@ -56,6 +58,12 @@ const routes = [
     meta: { title: '请求日志', icon: 'List' }
   },
   {
+    path: '/server-logs',
+    name: 'ServerLogs',
+    component: ServerLogs,
+    meta: { title: '服务器日志', icon: 'Monitor' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: Settings,
@@ -64,7 +72,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes
 })
 

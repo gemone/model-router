@@ -62,16 +62,6 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function fetchRouteRules() {
-    loading.value = true
-    try {
-      const { data } = await axios.get('/api/admin/routes')
-      routeRules.value = data
-    } finally {
-      loading.value = false
-    }
-  }
-
   async function fetchStats() {
     try {
       const { data } = await axios.get('/api/admin/stats/dashboard')
@@ -175,23 +165,6 @@ export const useAppStore = defineStore('app', () => {
     return data
   }
 
-  async function createRouteRule(rule) {
-    const { data } = await axios.post('/api/admin/routes', rule)
-    await fetchRouteRules()
-    return data
-  }
-
-  async function updateRouteRule(id, rule) {
-    const { data } = await axios.put(`/api/admin/routes/${id}`, rule)
-    await fetchRouteRules()
-    return data
-  }
-
-  async function deleteRouteRule(id) {
-    await axios.delete(`/api/admin/routes/${id}`)
-    await fetchRouteRules()
-  }
-
   async function testProvider(providerId) {
     try {
       // 确保模型数据已加载
@@ -232,6 +205,33 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
+  async function fetchRouteRules() {
+    loading.value = true
+    try {
+      const { data } = await axios.get('/api/admin/routes')
+      routeRules.value = data
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function createRouteRule(rule) {
+    const { data } = await axios.post('/api/admin/routes', rule)
+    await fetchRouteRules()
+    return data
+  }
+
+  async function updateRouteRule(id, rule) {
+    const { data } = await axios.put(`/api/admin/routes/${id}`, rule)
+    await fetchRouteRules()
+    return data
+  }
+
+  async function deleteRouteRule(id) {
+    await axios.delete(`/api/admin/routes/${id}`)
+    await fetchRouteRules()
+  }
+
   return {
     // State
     profiles,
@@ -268,11 +268,11 @@ export const useAppStore = defineStore('app', () => {
     deleteModel,
     testModel,
     testProvider,
-    createRouteRule,
-    updateRouteRule,
-    deleteRouteRule,
     fetchSettings,
     updateSettings,
     toggleSidebar,
+    createRouteRule,
+    updateRouteRule,
+    deleteRouteRule,
   }
 })
