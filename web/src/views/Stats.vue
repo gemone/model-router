@@ -1,16 +1,8 @@
 <template>
   <div class="stats">
-    <!-- 面包屑导航 -->
-    <div class="breadcrumb-wrapper">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/' }">Home</el-breadcrumb-item>
-        <el-breadcrumb-item>{{ $t("stats.title") }}</el-breadcrumb-item>
-      </el-breadcrumb>
-    </div>
-
     <div class="page-header">
-      <h2>{{ $t('stats.title') }}</h2>
-      <el-radio-group v-model="timeRange" @change="fetchData">
+      <h1 class="page-title">{{ $t('stats.title') }}</h1>
+      <el-radio-group v-model="timeRange" @change="fetchData" size="small">
         <el-radio-button label="today">{{ $t('stats.today') }}</el-radio-button>
         <el-radio-button label="7d">{{ $t('stats.last7Days') }}</el-radio-button>
         <el-radio-button label="30d">{{ $t('stats.last30Days') }}</el-radio-button>
@@ -18,12 +10,12 @@
     </div>
 
     <!-- 统计卡片 -->
-    <el-row :gutter="20" class="stats-row">
-      <el-col :xs="24" :sm="12" :md="6" v-for="stat in statCards" :key="stat.key">
+    <el-row :gutter="16" class="stats-row">
+      <el-col :xs="12" :sm="12" :md="6" v-for="stat in statCards" :key="stat.key">
         <el-card class="stat-card" shadow="hover">
           <div class="stat-content">
             <div class="stat-icon" :style="{ backgroundColor: stat.color }">
-              <el-icon :size="24"><component :is="stat.icon" /></el-icon>
+              <el-icon :size="20"><component :is="stat.icon" /></el-icon>
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ stat.value }}</div>
@@ -35,11 +27,11 @@
     </el-row>
 
     <!-- 图表区域 -->
-    <el-row :gutter="20" class="charts-row">
+    <el-row :gutter="16" class="charts-row">
       <el-col :xs="24" :lg="12">
         <el-card class="chart-card">
           <template #header>
-            <span>{{ $t('stats.requestStats') }}</span>
+            <span class="card-title">{{ $t('stats.requestStats') }}</span>
           </template>
           <div class="chart-container">
             <v-chart :option="requestChartOption" autoresize />
@@ -50,7 +42,7 @@
       <el-col :xs="24" :lg="12">
         <el-card class="chart-card">
           <template #header>
-            <span>{{ $t('stats.tokenStats') }}</span>
+            <span class="card-title">{{ $t('stats.tokenStats') }}</span>
           </template>
           <div class="chart-container">
             <v-chart :option="tokenChartOption" autoresize />
@@ -61,7 +53,7 @@
       <el-col :xs="24" :lg="12">
         <el-card class="chart-card">
           <template #header>
-            <span>{{ $t('stats.latencyStats') }}</span>
+            <span class="card-title">{{ $t('stats.latencyStats') }}</span>
           </template>
           <div class="chart-container">
             <v-chart :option="latencyChartOption" autoresize />
@@ -72,9 +64,9 @@
       <el-col :xs="24" :lg="12">
         <el-card class="chart-card">
           <template #header>
-            <span>{{ $t('stats.errorRate') }}</span>
+            <span class="card-title">{{ $t('stats.errorRate') }}</span>
           </template>
-          <div class="chart-container">
+          <div class="chart-container pie-container">
             <v-chart :option="errorRateChartOption" autoresize />
           </div>
         </el-card>
@@ -82,27 +74,30 @@
     </el-row>
 
     <!-- 供应商统计 -->
-    <el-row class="provider-stats-row">
+    <el-row class="table-row">
       <el-col :span="24">
-        <el-card>
+        <el-card class="table-card">
           <template #header>
-            <span>{{ $t('stats.providerStats') }}</span>
+            <span class="card-title">{{ $t('stats.providerStats') }}</span>
           </template>
-          <el-table :data="providerStats" stripe>
-            <el-table-column prop="name" :label="$t('provider.name')" />
-            <el-table-column :label="$t('stats.requests')" align="right">
+          <el-table :data="providerStats" stripe size="small" class="data-table">
+            <el-table-column prop="name" :label="$t('provider.name')" min-width="140" />
+            <el-table-column :label="$t('stats.requests')" align="right" width="110">
               <template #default="{ row }">{{ row.requests?.toLocaleString() || 0 }}</template>
             </el-table-column>
-            <el-table-column :label="$t('stats.tokens')" align="right">
+            <el-table-column :label="$t('stats.tokens')" align="right" width="110">
               <template #default="{ row }">{{ row.tokens?.toLocaleString() || 0 }}</template>
             </el-table-column>
-            <el-table-column :label="$t('stats.latency')" align="right">
-              <template #default="{ row }">{{ row.avg_latency?.toFixed(2) || 0 }}ms</template>
+            <el-table-column :label="$t('stats.latency')" align="right" width="100">
+              <template #default="{ row }">{{ row.avg_latency?.toFixed(0) || 0 }}ms</template>
             </el-table-column>
-            <el-table-column :label="$t('stats.errorRate')" align="right">
+            <el-table-column :label="$t('stats.errorRate')" align="right" width="100">
               <template #default="{ row }">
-                <el-tag :type="row.error_rate < 0.05 ? 'success' : row.error_rate < 0.1 ? 'warning' : 'danger'" size="small">
-                  {{ (row.error_rate * 100).toFixed(2) }}%
+                <el-tag
+                  :type="row.error_rate < 0.05 ? 'success' : row.error_rate < 0.1 ? 'warning' : 'danger'"
+                  size="small"
+                >
+                  {{ (row.error_rate * 100).toFixed(1) }}%
                 </el-tag>
               </template>
             </el-table-column>
@@ -112,27 +107,30 @@
     </el-row>
 
     <!-- 模型统计 -->
-    <el-row class="model-stats-row">
+    <el-row class="table-row">
       <el-col :span="24">
-        <el-card>
+        <el-card class="table-card">
           <template #header>
-            <span>{{ $t('stats.modelStats') }}</span>
+            <span class="card-title">{{ $t('stats.modelStats') }}</span>
           </template>
-          <el-table :data="modelStats" stripe>
-            <el-table-column prop="name" :label="$t('model.name')" />
-            <el-table-column :label="$t('stats.requests')" align="right">
+          <el-table :data="modelStats" stripe size="small" class="data-table">
+            <el-table-column prop="name" :label="$t('model.name')" min-width="140" />
+            <el-table-column :label="$t('stats.requests')" align="right" width="110">
               <template #default="{ row }">{{ row.requests?.toLocaleString() || 0 }}</template>
             </el-table-column>
-            <el-table-column :label="$t('stats.tokens')" align="right">
+            <el-table-column :label="$t('stats.tokens')" align="right" width="110">
               <template #default="{ row }">{{ row.tokens?.toLocaleString() || 0 }}</template>
             </el-table-column>
-            <el-table-column :label="$t('stats.latency')" align="right">
-              <template #default="{ row }">{{ row.avg_latency?.toFixed(2) || 0 }}ms</template>
+            <el-table-column :label="$t('stats.latency')" align="right" width="100">
+              <template #default="{ row }">{{ row.avg_latency?.toFixed(0) || 0 }}ms</template>
             </el-table-column>
-            <el-table-column :label="$t('stats.errorRate')" align="right">
+            <el-table-column :label="$t('stats.errorRate')" align="right" width="100">
               <template #default="{ row }">
-                <el-tag :type="row.error_rate < 0.05 ? 'success' : row.error_rate < 0.1 ? 'warning' : 'danger'" size="small">
-                  {{ (row.error_rate * 100).toFixed(2) }}%
+                <el-tag
+                  :type="row.error_rate < 0.05 ? 'success' : row.error_rate < 0.1 ? 'warning' : 'danger'"
+                  size="small"
+                >
+                  {{ (row.error_rate * 100).toFixed(1) }}%
                 </el-tag>
               </template>
             </el-table-column>
@@ -175,7 +173,7 @@ const store = useAppStore()
 const timeRange = ref('7d')
 const statsData = ref({})
 
-// 统计卡片 - 使用 store.stats 的字段名
+// 统计卡片
 const statCards = computed(() => {
   const s = store.stats
   return [
@@ -210,42 +208,44 @@ const statCards = computed(() => {
   ]
 })
 
-// 请求图表配置 - 使用真实趋势数据
+// 请求图表配置
 const requestChartOption = computed(() => {
   const trend = store.trendStats || {}
   const hours = trend.hours || []
   const requests = trend.requests || []
   const hasData = requests.some(r => r > 0)
-  
+
   return {
     tooltip: { trigger: 'axis' },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
       data: hours.length > 0 ? hours : ['00:00', '06:00', '12:00', '18:00'],
       axisLine: { lineStyle: { color: '#e5e7eb' } },
-      axisLabel: { color: '#6b7280' },
+      axisLabel: { color: '#6b7280', fontSize: 11 },
     },
     yAxis: {
       type: 'value',
       axisLine: { show: false },
       axisTick: { show: false },
       splitLine: { lineStyle: { color: '#f3f4f6' } },
-      axisLabel: { color: '#6b7280' },
+      axisLabel: { color: '#6b7280', fontSize: 11 },
     },
     series: [
       {
         name: t('stats.requests'),
         type: 'line',
         smooth: true,
+        symbol: 'circle',
+        symbolSize: 4,
         data: hasData ? requests : [0, 0, 0, 0],
         areaStyle: {
           color: {
             type: 'linear',
             x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
-              { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
-              { offset: 1, color: 'rgba(64, 158, 255, 0.05)' },
+              { offset: 0, color: 'rgba(64, 158, 255, 0.25)' },
+              { offset: 1, color: 'rgba(64, 158, 255, 0.02)' },
             ],
           },
         },
@@ -256,28 +256,28 @@ const requestChartOption = computed(() => {
   }
 })
 
-// Token 图表配置 - 使用真实趋势数据
+// Token 图表配置
 const tokenChartOption = computed(() => {
   const trend = store.trendStats || {}
   const hours = trend.hours || []
   const tokens = trend.tokens || []
   const hasData = tokens.some(t => t > 0)
-  
+
   return {
     tooltip: { trigger: 'axis' },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
       data: hours.length > 0 ? hours : ['00:00', '06:00', '12:00', '18:00'],
       axisLine: { lineStyle: { color: '#e5e7eb' } },
-      axisLabel: { color: '#6b7280' },
+      axisLabel: { color: '#6b7280', fontSize: 11 },
     },
     yAxis: {
       type: 'value',
       axisLine: { show: false },
       axisTick: { show: false },
       splitLine: { lineStyle: { color: '#f3f4f6' } },
-      axisLabel: { color: '#6b7280' },
+      axisLabel: { color: '#6b7280', fontSize: 11 },
     },
     series: [
       {
@@ -300,28 +300,28 @@ const tokenChartOption = computed(() => {
   }
 })
 
-// 延迟图表配置 - 使用真实趋势数据
+// 延迟图表配置
 const latencyChartOption = computed(() => {
   const trend = store.trendStats || {}
   const hours = trend.hours || []
   const avgLatency = statsData.value.avg_latency_ms || 0
   const hasData = hours.length > 0 && avgLatency > 0
-  
+
   return {
     tooltip: { trigger: 'axis' },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
       data: hours.length > 0 ? hours : ['00:00', '06:00', '12:00', '18:00'],
       axisLine: { lineStyle: { color: '#e5e7eb' } },
-      axisLabel: { color: '#6b7280' },
+      axisLabel: { color: '#6b7280', fontSize: 11 },
     },
     yAxis: {
       type: 'value',
       axisLine: { show: false },
       axisTick: { show: false },
       splitLine: { lineStyle: { color: '#f3f4f6' } },
-      axisLabel: { color: '#6b7280' },
+      axisLabel: { color: '#6b7280', fontSize: 11 },
     },
     series: [
       {
@@ -336,32 +336,39 @@ const latencyChartOption = computed(() => {
   }
 })
 
-// 错误率图表配置 - 使用真实统计数据
+// 错误率图表配置
 const errorRateChartOption = computed(() => {
   const s = statsData.value
   const successRate = s.success_rate || 0
   const errorRate = 100 - successRate
-  
+
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c}%' },
-    legend: { orient: 'vertical', right: '5%', top: 'center' },
+    legend: {
+      orient: 'vertical',
+      right: 0,
+      top: 'center',
+      itemWidth: 12,
+      itemHeight: 12,
+      textStyle: { fontSize: 12 }
+    },
     series: [
       {
         type: 'pie',
-        radius: ['45%', '70%'],
+        radius: ['55%', '75%'],
         center: ['35%', '50%'],
         data: [
           { value: successRate, name: 'Success', itemStyle: { color: '#67C23A' } },
           { value: errorRate > 0 ? errorRate : 0.1, name: 'Error', itemStyle: { color: '#F56C6C' } },
         ],
         label: { show: false },
-        emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+        emphasis: { label: { show: true, fontSize: 13, fontWeight: 'bold' } },
       },
     ],
   }
 })
 
-// 供应商统计数据 - 使用后端返回的真实数据
+// 供应商统计数据
 const providerStats = computed(() => {
   const providerStatsData = store.providerModelStats?.providers || []
   const providersMap = new Map((store.providers || []).map(p => [p.id, p.name]))
@@ -375,7 +382,7 @@ const providerStats = computed(() => {
   }))
 })
 
-// 模型统计数据 - 使用后端返回的真实数据
+// 模型统计数据
 const modelStats = computed(() => {
   const modelStatsData = store.providerModelStats?.models || []
 
@@ -403,30 +410,36 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.breadcrumb-wrapper {
-  margin-bottom: 16px;
+.stats {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 16px;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
-.page-header h2 {
+.page-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
   color: #1f2937;
 }
 
 .stats-row {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .stat-card {
-  margin-bottom: 20px;
+  margin-bottom: 0;
+}
+
+.stat-card :deep(.el-card__body) {
+  padding: 16px;
 }
 
 .stat-content {
@@ -435,20 +448,22 @@ onMounted(() => {
 }
 
 .stat-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  margin-right: 16px;
+  margin-right: 12px;
+  flex-shrink: 0;
 }
 
 .stat-value {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   color: #1f2937;
+  line-height: 1.2;
 }
 
 .stat-label {
@@ -458,24 +473,64 @@ onMounted(() => {
 }
 
 .charts-row {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .chart-card {
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
 
 .chart-card :deep(.el-card__header) {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.chart-card :deep(.el-card__body) {
+  padding: 16px;
+}
+
+.card-title {
+  font-size: 15px;
   font-weight: 600;
   color: #1f2937;
 }
 
 .chart-container {
-  height: 280px;
+  height: 240px;
 }
 
-.provider-stats-row,
-.model-stats-row {
-  margin-bottom: 20px;
+.pie-container {
+  height: 200px;
+}
+
+.table-row {
+  margin-bottom: 16px;
+}
+
+.table-row:last-child {
+  margin-bottom: 0;
+}
+
+.table-card :deep(.el-card__header) {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.table-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.data-table {
+  font-size: 13px;
+}
+
+.data-table :deep(.el-table__header th) {
+  background-color: #fafafa;
+  font-weight: 600;
+}
+
+.data-table :deep(.el-table__body-wrapper) {
+  max-height: 300px;
+  overflow-y: auto;
 }
 </style>

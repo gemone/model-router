@@ -62,7 +62,7 @@
                             <span class="detail-label">{{ $t("profile.modelsCount") }}</span>
                             <span class="detail-value">
                                 <el-icon><Cpu /></el-icon>
-                                {{ profile.models?.length || 0 }}
+                                {{ profile.model_ids?.length || 0 }}
                             </span>
                         </div>
                         <div class="detail-item">
@@ -136,6 +136,23 @@
                 <el-form-item :label="$t('common.status')">
                     <el-switch v-model="form.enabled" />
                 </el-form-item>
+                <el-form-item :label="$t('profile.models')">
+                    <el-select
+                        v-model="form.model_ids"
+                        multiple
+                        collapse-tags
+                        collapse-tags-tooltip
+                        :placeholder="$t('profile.selectModels')"
+                        style="width: 100%"
+                    >
+                        <el-option
+                            v-for="model in store.models"
+                            :key="model.id"
+                            :label="model.name + ' (' + (model.original_name || model.name) + ')'"
+                            :value="model.id"
+                        />
+                    </el-select>
+                </el-form-item>
             </el-form>
             <template #footer>
                 <el-button @click="dialogVisible = false">{{
@@ -180,6 +197,7 @@ const form = ref({
     description: "",
     priority: 0,
     enabled: true,
+    model_ids: [],
 });
 
 const rules = {
@@ -207,6 +225,7 @@ function showAddDialog() {
         description: "",
         priority: 0,
         enabled: true,
+        model_ids: [],
     };
     dialogVisible.value = true;
 }
@@ -247,7 +266,10 @@ function copyEndpoint(path) {
     ElMessage.success(t("message.copySuccess"));
 }
 
-onMounted(() => store.fetchProfiles());
+onMounted(() => {
+    store.fetchProfiles();
+    store.fetchModels();
+});
 </script>
 
 <style scoped>

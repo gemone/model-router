@@ -1,23 +1,50 @@
 <template>
     <div class="dashboard">
-        <!-- 面包屑导航 -->
-        <div class="breadcrumb-wrapper">
-            <el-breadcrumb separator="/">
-                <el-breadcrumb-item :to="{ path: '/' }">Home</el-breadcrumb-item>
-                <el-breadcrumb-item>{{ $t("dashboard.title") }}</el-breadcrumb-item>
-            </el-breadcrumb>
-        </div>
-
+        <!-- 页面标题 -->
         <div class="page-header">
-            <h2 class="page-title">{{ $t("dashboard.title") }}</h2>
+            <div class="header-left">
+                <h1 class="page-title">{{ $t("dashboard.title") }}</h1>
+                <el-tag v-if="isLive" type="success" size="small" class="live-tag">
+                    <el-icon><VideoPlay /></el-icon>
+                    {{ $t("dashboard.realtimeStatus") }}
+                </el-tag>
+            </div>
+            <div class="header-actions">
+                <el-button-group>
+                    <el-button
+                        :type="autoRefresh ? 'primary' : ''"
+                        @click="toggleAutoRefresh"
+                        :icon="autoRefresh ? Timer : Refresh"
+                    >
+                        {{ autoRefresh ? $t('dashboard.autoRefreshOn') : $t('dashboard.autoRefreshOff') }}
+                    </el-button>
+                    <el-dropdown @command="setRefreshInterval">
+                        <el-button>
+                            {{ refreshInterval / 1000 }}s
+                            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                        </el-button>
+                        <template #dropdown>
+                            <el-dropdown-menu>
+                                <el-dropdown-item :command="5000">5s</el-dropdown-item>
+                                <el-dropdown-item :command="10000">10s</el-dropdown-item>
+                                <el-dropdown-item :command="30000">30s</el-dropdown-item>
+                                <el-dropdown-item :command="60000">60s</el-dropdown-item>
+                            </el-dropdown-menu>
+                        </template>
+                    </el-dropdown>
+                </el-button-group>
+                <el-button @click="exportData" :icon="Download">
+                    {{ $t('dashboard.exportData') }}
+                </el-button>
+            </div>
         </div>
 
         <!-- 统计卡片 -->
-        <el-row :gutter="20" class="stats-row">
+        <el-row :gutter="16" class="stats-row">
             <el-col
-                :xs="24"
+                :xs="12"
                 :sm="12"
-                :md="8"
+                :md="6"
                 :lg="6"
                 v-for="stat in statsCards"
                 :key="stat.key"
@@ -28,12 +55,14 @@
                             class="stat-icon"
                             :style="{ backgroundColor: stat.color }"
                         >
-                            <el-icon :size="24"
-                                ><component :is="stat.icon"
-                            /></el-icon>
+                            <el-icon :size="20"><component :is="stat.icon" /></el-icon>
                         </div>
                         <div class="stat-info">
-                            <div class="stat-value">{{ stat.value }}</div>
+                            <div class="stat-value">
+                                {{ stat.value }}
+                                <el-icon v-if="stat.trend === 'up'" class="trend-icon up"><CaretTop /></el-icon>
+                                <el-icon v-else-if="stat.trend === 'down'" class="trend-icon down"><CaretBottom /></el-icon>
+                            </div>
                             <div class="stat-label">{{ stat.label }}</div>
                         </div>
                     </div>
@@ -42,26 +71,24 @@
         </el-row>
 
         <!-- 图表区域 -->
-        <el-row :gutter="20" class="charts-row">
+        <el-row :gutter="16" class="charts-row">
             <el-col :xs="24" :lg="16">
                 <el-card class="chart-card">
                     <template #header>
                         <div class="card-header">
-                            <span>{{ $t("dashboard.requestTrend") }}</span>
-                            <el-radio-group v-model="timeRange" size="small">
-                                <el-radio-button value="24h"
-                                    >24H</el-radio-button
-                                >
+                            <span class="card-title">{{ $t("dashboard.requestTrend") }}</span>
+                            <el-radio-group v-model="timeRange" size="small" @change="fetchTrendData">
+                                <el-radio-button value="1h">1H</el-radio-button>
+                                <el-radio-button value="6h">6H</el-radio-button>
+                                <el-radio-button value="24h">24H</el-radio-button>
                                 <el-radio-button value="7d">7D</el-radio-button>
-                                <el-radio-button value="30d"
-                                    >30D</el-radio-button
-                                >
+                                <el-radio-button value="30d">30D</el-radio-button>
                             </el-radio-group>
                         </div>
                     </template>
                     <div class="chart-container">
                         <v-chart v-if="hasTrendData" :option="trendChartOption" autoresize />
-                        <el-empty v-else :description="$t('dashboard.noTrendData')" />
+                        <el-empty v-else :description="$t('dashboard.noTrendData')" :image-size="100" />
                     </div>
                 </el-card>
             </el-col>
@@ -70,12 +97,61 @@
                 <el-card class="chart-card">
                     <template #header>
                         <div class="card-header">
-                            <span>{{ $t("dashboard.topModels") }}</span>
+                            <span class="card-title">{{ $t("dashboard.topModels") }}</span>
+                            <el-button link size="small" @click="goToStats">
+                                {{ $t("common.more") }} →
+                            </el-button>
                         </div>
                     </template>
-                    <div class="chart-container">
+                    <div class="chart-container pie-container">
                         <v-chart v-if="hasTopModelsData" :option="pieChartOption" autoresize />
-                        <el-empty v-else :description="$t('dashboard.noTopModelsData')" />
+                        <el-empty v-else :description="$t('dashboard.noTopModelsData')" :image-size="80" />
+                    </div>
+                </el-card>
+            </el-col>
+        </el-row>
+
+        <!-- Provider 健康状态 -->
+        <el-row class="health-row">
+            <el-col :span="24">
+                <el-card class="health-card">
+                    <template #header>
+                        <div class="card-header">
+                            <span class="card-title">{{ $t("dashboard.providerHealth") }}</span>
+                            <el-button link size="small" @click="checkAllHealth">
+                                <el-icon><Refresh /></el-icon>
+                                {{ $t("dashboard.checkAll") }}
+                            </el-button>
+                        </div>
+                    </template>
+                    <div class="health-list">
+                        <div
+                            v-for="provider in healthProviders"
+                            :key="provider.id"
+                            class="health-item"
+                            :class="provider.healthStatus"
+                        >
+                            <div class="health-info">
+                                <el-icon class="health-icon">
+                                    <component :is="getHealthIcon(provider.healthStatus)" />
+                                </el-icon>
+                                <div class="health-details">
+                                    <div class="health-name">{{ provider.name }}</div>
+                                    <div class="health-type">{{ provider.type }}</div>
+                                </div>
+                            </div>
+                            <div class="health-stats">
+                                <el-tag size="small" :type="getHealthTagType(provider.healthStatus)">
+                                    {{ $t(`provider.health${capitalize(provider.healthStatus)}`) }}
+                                </el-tag>
+                                <span v-if="provider.latency" class="health-latency">
+                                    {{ provider.latency }}ms
+                                </span>
+                                <span v-if="provider.lastCheck" class="health-time">
+                                    {{ formatTime(provider.lastCheck) }}
+                                </span>
+                            </div>
+                        </div>
                     </div>
                 </el-card>
             </el-col>
@@ -84,52 +160,47 @@
         <!-- 最近日志 -->
         <el-row class="logs-row">
             <el-col :span="24">
-                <el-card>
+                <el-card class="logs-card">
                     <template #header>
                         <div class="card-header">
-                            <span>{{ $t("dashboard.recentLogs") }}</span>
+                            <span class="card-title">{{ $t("dashboard.recentLogs") }}</span>
                             <el-button link type="primary" @click="goToLogs">
-                                {{ $t("common.more") }}
+                                {{ $t("common.more") }} →
                             </el-button>
                         </div>
                     </template>
-                    <el-table :data="recentLogs" stripe size="small">
+                    <el-table :data="recentLogs" stripe size="small" class="logs-table">
                         <el-table-column
                             prop="request_id"
                             label="ID"
-                            width="200"
+                            width="180"
                             show-overflow-tooltip
                         />
                         <el-table-column
                             prop="model"
                             :label="$t('logs.model')"
-                            width="150"
+                            width="140"
                         />
                         <el-table-column
                             prop="provider_id"
                             :label="$t('logs.provider')"
-                            width="120"
+                            width="100"
                         />
-                        <el-table-column :label="$t('logs.status')" width="100">
+                        <el-table-column :label="$t('logs.status')" width="80" align="center">
                             <template #default="{ row }">
                                 <el-tag
-                                    :type="
-                                        row.status === 'success'
-                                            ? 'success'
-                                            : 'danger'
-                                    "
+                                    :type="row.status === 'success' ? 'success' : 'danger'"
                                     size="small"
                                 >
-                                    {{
-                                        row.status === "success" ? $t("logs.success") : $t("logs.error")
-                                    }}
+                                    {{ row.status === "success" ? $t("logs.success") : $t("logs.error") }}
                                 </el-tag>
                             </template>
                         </el-table-column>
                         <el-table-column
                             prop="latency"
                             :label="$t('logs.latency')"
-                            width="100"
+                            width="90"
+                            align="right"
                         >
                             <template #default="{ row }">
                                 {{ row.latency }}ms
@@ -138,6 +209,7 @@
                         <el-table-column
                             prop="created_at"
                             :label="$t('logs.timestamp')"
+                            min-width="160"
                         >
                             <template #default="{ row }">
                                 {{ formatTime(row.created_at) }}
@@ -151,7 +223,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { use } from "echarts/core";
@@ -162,8 +234,10 @@ import {
     TooltipComponent,
     LegendComponent,
     GridComponent,
+    DataZoomComponent,
 } from "echarts/components";
 import VChart from "vue-echarts";
+import { ElMessage } from "element-plus";
 
 import { useAppStore } from "@/stores/app";
 
@@ -175,14 +249,21 @@ use([
     TooltipComponent,
     LegendComponent,
     GridComponent,
+    DataZoomComponent,
 ]);
 
 const { t } = useI18n();
-
 const router = useRouter();
 const store = useAppStore();
 
 const timeRange = ref("24h");
+const autoRefresh = ref(false);
+const refreshInterval = ref(10000);
+const isLive = ref(false);
+let refreshTimer = null;
+
+// Provider 健康状态
+const healthProviders = ref([]);
 
 // 判断是否有趋势数据
 const hasTrendData = computed(() => {
@@ -207,6 +288,7 @@ const statsCards = computed(() => {
             label: t("dashboard.totalRequests"),
             icon: "DataLine",
             color: "#409EFF",
+            trend: s.requests_trend >= 0 ? 'up' : 'down',
         },
         {
             key: "lastHour",
@@ -214,20 +296,23 @@ const statsCards = computed(() => {
             label: t("dashboard.lastHourRequests"),
             icon: "TrendCharts",
             color: "#67C23A",
+            trend: null,
         },
         {
             key: "success",
-            value: (s.success_rate || 0) + "%",
+            value: (s.success_rate || 0).toFixed(1) + "%",
             label: t("dashboard.successRate"),
             icon: "CircleCheck",
             color: "#E6A23C",
+            trend: null,
         },
         {
             key: "latency",
-            value: (s.avg_latency_ms || 0) + "ms",
+            value: (s.avg_latency_ms || 0).toFixed(0) + "ms",
             label: t("dashboard.avgLatency"),
             icon: "Timer",
             color: "#F56C6C",
+            trend: s.latency_trend <= 0 ? 'up' : 'down', // 延迟降低是好事
         },
     ];
 });
@@ -237,8 +322,7 @@ const trendChartOption = computed(() => {
     const s = store.stats;
     const trend = store.trendStats;
     const hasData = s.total_requests_24h > 0;
-    
-    // 使用后端返回的趋势数据
+
     const hours = trend.hours || [];
     const data = trend.requests || [];
 
@@ -251,38 +335,36 @@ const trendChartOption = computed(() => {
             left: "3%",
             right: "4%",
             bottom: "3%",
+            top: "10%",
             containLabel: true,
         },
+        dataZoom: [
+            {
+                type: "inside",
+                start: 0,
+                end: 100,
+            },
+            {
+                start: 0,
+                end: 100,
+                height: 20,
+                bottom: 10,
+            },
+        ],
         xAxis: {
             type: "category",
             boundaryGap: false,
             data: hours,
-            axisLine: {
-                lineStyle: {
-                    color: "#e5e7eb",
-                },
-            },
-            axisLabel: {
-                color: "#6b7280",
-            },
+            axisLine: { lineStyle: { color: "#e5e7eb" } },
+            axisLabel: { color: "#6b7280", fontSize: 11 },
         },
         yAxis: {
             type: "value",
             minInterval: 1,
-            axisLine: {
-                show: false,
-            },
-            axisTick: {
-                show: false,
-            },
-            splitLine: {
-                lineStyle: {
-                    color: "#f3f4f6",
-                },
-            },
-            axisLabel: {
-                color: "#6b7280",
-            },
+            axisLine: { show: false },
+            axisTick: { show: false },
+            splitLine: { lineStyle: { color: "#f3f4f6" } },
+            axisLabel: { color: "#6b7280", fontSize: 11 },
         },
         series: [
             {
@@ -290,27 +372,20 @@ const trendChartOption = computed(() => {
                 type: "line",
                 smooth: true,
                 symbol: "circle",
-                symbolSize: 6,
+                symbolSize: 5,
                 data: data,
                 areaStyle: {
                     color: {
                         type: "linear",
-                        x: 0,
-                        y: 0,
-                        x2: 0,
-                        y2: 1,
+                        x: 0, y: 0, x2: 0, y2: 1,
                         colorStops: [
-                            { offset: 0, color: "rgba(64, 158, 255, 0.3)" },
-                            { offset: 1, color: "rgba(64, 158, 255, 0.05)" },
+                            { offset: 0, color: "rgba(64, 158, 255, 0.25)" },
+                            { offset: 1, color: "rgba(64, 158, 255, 0.02)" },
                         ],
                     },
                 },
-                itemStyle: {
-                    color: "#409EFF",
-                },
-                lineStyle: {
-                    width: 2,
-                },
+                itemStyle: { color: "#409EFF" },
+                lineStyle: { width: 2 },
             },
         ],
     };
@@ -321,9 +396,8 @@ const pieChartOption = computed(() => {
     const s = store.stats;
     const topModels = s.top_models || {};
     const hasData = Object.keys(topModels).length > 0;
-    
-    // 如果有真实数据，使用真实数据；否则显示空状态
-    const data = hasData 
+
+    const data = hasData
         ? Object.entries(topModels).map(([name, value], index) => ({
             value,
             name,
@@ -338,33 +412,33 @@ const pieChartOption = computed(() => {
         },
         legend: {
             orient: "vertical",
-            right: "5%",
+            right: 0,
             top: "center",
-            textStyle: {
-                color: "#6b7280",
-            },
+            itemWidth: 12,
+            itemHeight: 12,
+            textStyle: { color: "#6b7280", fontSize: 12 },
             data: hasData ? Object.keys(topModels) : [],
         },
         series: [
             {
                 type: "pie",
-                radius: ["45%", "70%"],
-                center: ["35%", "50%"],
+                radius: ["50%", "72%"],
+                center: ["30%", "50%"],
                 avoidLabelOverlap: false,
                 itemStyle: {
-                    borderRadius: 8,
+                    borderRadius: 6,
                     borderColor: "#fff",
                     borderWidth: 2,
                 },
-                label: {
-                    show: false,
-                },
+                label: { show: false },
                 emphasis: {
                     label: {
                         show: true,
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: "bold",
                     },
+                    scale: true,
+                    scaleSize: 10,
                 },
                 data: data,
             },
@@ -380,50 +454,219 @@ function getColorByIndex(index) {
 
 // 最近日志 - 从 store 获取真实数据
 const recentLogs = computed(() => {
-    return store.logs.slice(0, 5) || []
-})
+    return store.logs.slice(0, 5) || [];
+});
 
 function formatTime(time) {
-    return new Date(time).toLocaleString();
+    const date = new Date(time);
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) return `${days}d ago`;
+    if (hours > 0) return `${hours}h ago`;
+    if (minutes > 0) return `${minutes}m ago`;
+    return 'Just now';
+}
+
+function capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function getHealthIcon(status) {
+    switch (status) {
+        case 'healthy': return 'CircleCheck';
+        case 'unhealthy': return 'CircleClose';
+        default: return 'Clock';
+    }
+}
+
+function getHealthTagType(status) {
+    switch (status) {
+        case 'healthy': return 'success';
+        case 'unhealthy': return 'danger';
+        default: return 'info';
+    }
+}
+
+// 自动刷新控制
+function toggleAutoRefresh() {
+    autoRefresh.value = !autoRefresh.value;
+    isLive.value = autoRefresh.value;
+    if (autoRefresh.value) {
+        startAutoRefresh();
+    } else {
+        stopAutoRefresh();
+    }
+}
+
+function setRefreshInterval(interval) {
+    refreshInterval.value = interval;
+    if (autoRefresh.value) {
+        stopAutoRefresh();
+        startAutoRefresh();
+    }
+}
+
+function startAutoRefresh() {
+    refreshTimer = setInterval(() => {
+        refreshData();
+    }, refreshInterval.value);
+}
+
+function stopAutoRefresh() {
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+}
+
+async function refreshData() {
+    await Promise.all([
+        store.fetchStats(),
+        store.fetchTrendStats(),
+        store.fetchLogs(),
+    ]);
+    // 更新健康状态
+    await updateHealthStatus();
+}
+
+async function fetchTrendData() {
+    await store.fetchTrendStats();
+}
+
+async function checkAllHealth() {
+    ElMessage.info(t('dashboard.checkingHealth'));
+    await Promise.all(
+        store.providers.map(p => testProviderHealth(p))
+    );
+}
+
+async function testProviderHealth(provider) {
+    const startTime = Date.now();
+    try {
+        const result = await store.testProvider(provider.id);
+        const latency = Date.now() - startTime;
+        const providerIndex = healthProviders.value.findIndex(p => p.id === provider.id);
+        if (providerIndex >= 0) {
+            healthProviders.value[providerIndex] = {
+                ...healthProviders.value[providerIndex],
+                healthStatus: result.success ? 'healthy' : 'unhealthy',
+                latency,
+                lastCheck: new Date().toISOString(),
+            };
+        }
+    } catch (e) {
+        const providerIndex = healthProviders.value.findIndex(p => p.id === provider.id);
+        if (providerIndex >= 0) {
+            healthProviders.value[providerIndex] = {
+                ...healthProviders.value[providerIndex],
+                healthStatus: 'unhealthy',
+                lastCheck: new Date().toISOString(),
+            };
+        }
+    }
+}
+
+async function updateHealthStatus() {
+    // 从 providers 初始化健康状态列表
+    if (healthProviders.value.length === 0) {
+        healthProviders.value = store.providers.map(p => ({
+            ...p,
+            healthStatus: 'unknown',
+        }));
+    }
+}
+
+function exportData() {
+    const data = {
+        stats: store.stats,
+        trend: store.trendStats,
+        timestamp: new Date().toISOString(),
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dashboard-stats-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    ElMessage.success(t('message.saveSuccess'));
 }
 
 function goToLogs() {
     router.push("/logs");
 }
 
-onMounted(() => {
-    // 加载真实数据
-    store.fetchStats();
-    store.fetchTrendStats();
+function goToStats() {
+    router.push("/stats");
+}
+
+onMounted(async () => {
+    await refreshData();
+    await updateHealthStatus();
+});
+
+onUnmounted(() => {
+    stopAutoRefresh();
 });
 </script>
 
 <style scoped>
 .dashboard {
-    max-width: 100%;
-}
-
-.breadcrumb-wrapper {
-    margin-bottom: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 16px;
 }
 
 .page-header {
-    margin-bottom: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .page-title {
     margin: 0;
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 600;
     color: #1f2937;
 }
 
+.live-tag {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.header-actions {
+    display: flex;
+    gap: 12px;
+}
+
 .stats-row {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
 }
 
 .stat-card {
-    margin-bottom: 20px;
+    margin-bottom: 0;
+}
+
+.stat-card :deep(.el-card__body) {
+    padding: 16px;
 }
 
 .stat-content {
@@ -432,34 +675,60 @@ onMounted(() => {
 }
 
 .stat-icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 12px;
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: #fff;
-    margin-right: 16px;
+    margin-right: 12px;
+    flex-shrink: 0;
 }
 
 .stat-value {
-    font-size: 28px;
+    font-size: 24px;
     font-weight: 700;
     color: #1f2937;
+    line-height: 1.2;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.trend-icon {
+    font-size: 16px;
+}
+
+.trend-icon.up {
+    color: #67C23A;
+}
+
+.trend-icon.down {
+    color: #F56C6C;
 }
 
 .stat-label {
-    font-size: 14px;
+    font-size: 13px;
     color: #6b7280;
-    margin-top: 4px;
+    margin-top: 2px;
 }
 
 .charts-row {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
 }
 
 .chart-card {
-    margin-bottom: 20px;
+    margin-bottom: 0;
+}
+
+.chart-card :deep(.el-card__header) {
+    padding: 14px 16px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.chart-card :deep(.el-card__body) {
+    padding: 16px;
 }
 
 .card-header {
@@ -468,22 +737,160 @@ onMounted(() => {
     align-items: center;
 }
 
-.card-header span {
-    font-size: 16px;
+.card-title {
+    font-size: 15px;
     font-weight: 600;
     color: #1f2937;
 }
 
 .chart-container {
-    height: 300px;
+    height: 260px;
 }
 
-.chart {
-    width: 100%;
-    height: 100%;
+.pie-container {
+    height: 220px;
+}
+
+.health-row {
+    margin-bottom: 16px;
+}
+
+.health-card :deep(.el-card__header) {
+    padding: 14px 16px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.health-card :deep(.el-card__body) {
+    padding: 16px;
+}
+
+.health-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.health-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    transition: all 0.3s;
+}
+
+.health-item:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.health-item.healthy {
+    border-left: 3px solid #67C23A;
+}
+
+.health-item.unhealthy {
+    border-left: 3px solid #F56C6C;
+}
+
+.health-item.unknown {
+    border-left: 3px solid #909399;
+}
+
+.health-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.health-icon {
+    font-size: 24px;
+}
+
+.health-icon.healthy {
+    color: #67C23A;
+}
+
+.health-icon.unhealthy {
+    color: #F56C6C;
+}
+
+.health-icon.unknown {
+    color: #909399;
+}
+
+.health-details {
+    display: flex;
+    flex-direction: column;
+}
+
+.health-name {
+    font-weight: 500;
+    color: #1f2937;
+}
+
+.health-type {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.health-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.health-latency {
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.health-time {
+    font-size: 11px;
+    color: #9ca3af;
 }
 
 .logs-row {
-    margin-bottom: 20px;
+    margin-bottom: 0;
+}
+
+.logs-card :deep(.el-card__header) {
+    padding: 14px 16px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.logs-card :deep(.el-card__body) {
+    padding: 0;
+}
+
+.logs-table {
+    font-size: 13px;
+}
+
+.logs-table :deep(.el-table__header th) {
+    background-color: #fafafa;
+    font-weight: 600;
+}
+
+.logs-table :deep(.el-table__body-wrapper) {
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .header-actions {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .health-list {
+        grid-template-columns: 1fr;
+    }
 }
 </style>

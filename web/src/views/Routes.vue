@@ -16,7 +16,7 @@
       </el-button>
     </div>
 
-    <el-empty v-if="!routeRules.length" :description="$t('common.noData')" />
+    <el-empty v-if="!routeRules || !routeRules.length" :description="$t('common.noData')" />
 
     <el-card v-for="rule in routeRules" :key="rule.id" class="rule-card" shadow="hover">
       <template #header>
@@ -39,6 +39,10 @@
         <div class="detail-item">
           <span class="label">{{ $t('route.strategy') }}:</span>
           <el-tag size="small">{{ getStrategyLabel(rule.strategy) }}</el-tag>
+        </div>
+        <div class="detail-item">
+          <span class="label">{{ $t('route.contentType') }}:</span>
+          <el-tag :type="getContentTypeTagType(rule.content_type)" size="small">{{ getContentTypeLabel(rule.content_type) }}</el-tag>
         </div>
         <div class="detail-item">
           <span class="label">{{ $t('route.targetModels') }}:</span>
@@ -71,6 +75,14 @@
             <el-option :label="$t('route.strategyWeighted')" value="weighted" />
             <el-option :label="$t('route.strategyAuto')" value="auto" />
           </el-select>
+        </el-form-item>
+        <el-form-item :label="$t('route.contentType')" prop="content_type">
+          <el-select v-model="form.content_type" style="width: 100%">
+            <el-option :label="$t('route.contentTypeAll')" value="all" />
+            <el-option :label="$t('route.contentTypeText')" value="text" />
+            <el-option :label="$t('route.contentTypeImage')" value="image" />
+          </el-select>
+          <div class="form-tip">{{ $t('route.contentTypeTip') }}</div>
         </el-form-item>
         <el-form-item :label="$t('route.targetModels')" prop="target_models">
           <el-select
@@ -136,6 +148,7 @@ const form = ref({
   name: '',
   model_pattern: '',
   strategy: 'priority',
+  content_type: 'all',
   target_models: [],
   fallback_models: [],
   fallback_enabled: true,
@@ -170,11 +183,30 @@ function showAddDialog() {
     name: '',
     model_pattern: '',
     strategy: 'priority',
+    content_type: 'all',
     target_models: [],
     fallback_models: [],
     fallback_enabled: true,
   }
   dialogVisible.value = true
+}
+
+function getContentTypeLabel(contentType) {
+  const labels = {
+    all: t('route.contentTypeAll'),
+    text: t('route.contentTypeText'),
+    image: t('route.contentTypeImage'),
+  }
+  return labels[contentType] || contentType
+}
+
+function getContentTypeTagType(contentType) {
+  const types = {
+    all: '',
+    text: 'info',
+    image: 'warning',
+  }
+  return types[contentType] || ''
 }
 
 function editRule(rule) {
@@ -183,6 +215,7 @@ function editRule(rule) {
     name: rule.name,
     model_pattern: rule.model_pattern,
     strategy: rule.strategy,
+    content_type: rule.content_type || 'all',
     target_models: [...(rule.target_models || [])],
     fallback_models: [...(rule.fallback_models || [])],
     fallback_enabled: rule.fallback_enabled || false,

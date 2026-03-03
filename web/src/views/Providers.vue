@@ -16,11 +16,14 @@
         </template>
       </el-table-column>
       <el-table-column prop="base_url" :label="$t('provider.baseUrl')" show-overflow-tooltip />
-      <el-table-column :label="$t('provider.healthStatus')" width="120">
+      <el-table-column :label="$t('provider.healthStatus')" width="140">
         <template #default="{ row }">
-          <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">
-            {{ row.enabled ? 'Healthy' : 'Offline' }}
+          <el-tag :type="getHealthStatus(row.id).type" size="small">
+            {{ getHealthStatus(row.id).text }}
           </el-tag>
+          <div v-if="getHealthStatus(row.id).time" class="health-time">
+            {{ formatTime(getHealthStatus(row.id).time) }}
+          </div>
         </template>
       </el-table-column>
       <el-table-column :label="$t('common.actions')" width="200">
@@ -56,6 +59,10 @@
         </el-form-item>
         <el-form-item :label="$t('provider.baseUrl')" prop="base_url">
           <el-input v-model="form.base_url" placeholder="https://api.example.com" />
+        </el-form-item>
+        <el-form-item label="Chat Path" prop="chat_path">
+          <el-input v-model="form.chat_path" placeholder="/v1/chat/completions" />
+          <div class="form-tip">自定义聊天完成路径，例如 GLM 使用 /v4/chat/completions</div>
         </el-form-item>
         <el-form-item :label="$t('provider.apiKey')" prop="api_key">
           <el-input v-model="form.api_key" type="password" show-password />
@@ -95,6 +102,25 @@ const { t } = useI18n()
 const store = useAppStore()
 const providers = computed(() => store.providers)
 
+// 健康状态缓存
+const healthStatusMap = ref(new Map())
+
+// 获取健康状态
+function getHealthStatus(providerId) {
+  const status = healthStatusMap.value.get(providerId)
+  if (!status) {
+    return { type: 'info', text: t('provider.notTested'), time: null }
+  }
+  return status
+}
+
+// 格式化时间
+function formatTime(timeStr) {
+  if (!timeStr) return ''
+  const date = new Date(timeStr)
+  return date.toLocaleTimeString()
+}
+
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const formRef = ref()
@@ -102,6 +128,7 @@ const form = ref({
   name: '',
   type: 'openai',
   base_url: '',
+  chat_path: '/v1/chat/completions',
   api_key: '',
   priority: 0,
   weight: 100,
@@ -117,7 +144,7 @@ const rules = {
 
 function showAddDialog() {
   isEdit.value = false
-  form.value = { name: '', type: 'openai', base_url: '', api_key: '', priority: 0, weight: 100, rate_limit: 0, enabled: true }
+  form.value = { name: '', type: 'openai', base_url: '', chat_path: '/v1/chat/completions', api_key: '', priority: 0, weight: 100, rate_limit: 0, enabled: true }
   dialogVisible.value = true
 }
 
@@ -149,9 +176,41 @@ function confirmDelete(provider) {
     .catch(() => {})
 }
 
-function testProvider(provider) {
-  // TODO: implement test
-  ElMessage.info(`Testing ${provider.name}...`)
+async function testProvider(provider) {
+  const loadingMsg = ElMessage.info({
+    message: `${t('provider.testConnection')}: ${provider.name}...`,
+    duration: 0,
+  })
+  try {
+    const result = await store.testProvider(provider.id)
+    loadingMsg.close()
+    if (result.success) {
+      healthStatusMap.value.set(provider.id, {
+        type: 'success',
+        text: t('provider.healthy'),
+        time: new Date().toISOString(),
+        latency: result.latency
+      })
+      ElMessage.success(`${t('provider.testSuccess')}, ${t('logs.latency')}: ${result.latency}ms`)
+    } else {
+      healthStatusMap.value.set(provider.id, {
+        type: 'danger',
+        text: t('provider.unhealthy'),
+        time: new Date().toISOString(),
+        error: result.error
+      })
+      ElMessage.error(`${t('provider.testFailed')}: ${result.error}`)
+    }
+  } catch (e) {
+    loadingMsg.close()
+    healthStatusMap.value.set(provider.id, {
+      type: 'danger',
+      text: t('provider.unhealthy'),
+      time: new Date().toISOString(),
+      error: e.message
+    })
+    ElMessage.error(`${t('provider.testFailed')}: ${e.message}`)
+  }
 }
 
 onMounted(() => store.fetchProviders())
@@ -174,5 +233,11 @@ onMounted(() => store.fetchProviders())
 .unit {
   margin-left: 8px;
   color: #606266;
+}
+
+.health-time {
+  font-size: 11px;
+  color: #909399;
+  margin-top: 4px;
 }
 </style>

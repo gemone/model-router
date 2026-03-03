@@ -171,7 +171,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
@@ -284,10 +284,13 @@ function exportLogs() {
   ElMessage.success(t('message.copySuccess'))
 }
 
-function clearLogs() {
-  // TODO: Call API to clear logs
-  store.logs = []
-  ElMessage.success('Logs cleared')
+async function clearLogs() {
+  ElMessageBox.confirm(t('message.confirmDelete'), 'Warning', { type: 'warning' })
+    .then(async () => {
+      await store.clearLogs()
+      ElMessage.success(t('message.deleteSuccess'))
+    })
+    .catch(() => {})
 }
 
 onMounted(() => {

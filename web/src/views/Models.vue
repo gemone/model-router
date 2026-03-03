@@ -49,16 +49,6 @@
           <el-input v-model="form.original_name" placeholder="gpt-4-turbo-preview" />
           <div class="form-tip">{{ $t('model.originalNameTip') }}</div>
         </el-form-item>
-        <el-form-item :label="$t('model.profile')" prop="profile_id">
-          <el-select v-model="form.profile_id" style="width: 100%">
-            <el-option
-              v-for="p in store.profileOptions"
-              :key="p.value"
-              :label="p.label"
-              :value="p.value"
-            />
-          </el-select>
-        </el-form-item>
         <el-form-item :label="$t('model.provider')" prop="provider_id">
           <el-select v-model="form.provider_id" style="width: 100%">
             <el-option
@@ -98,6 +88,10 @@
           </el-col>
         </el-row>
         <div class="form-tip price-tip">{{ $t('model.priceTip') }}</div>
+        <el-form-item :label="$t('model.rateLimit')">
+          <el-input-number v-model="form.rate_limit" :min="0" :step="10" style="width: 200px" />
+          <div class="form-tip">{{ $t('model.rateLimitTip') }}</div>
+        </el-form-item>
         <el-form-item :label="$t('common.status')">
           <el-switch v-model="form.enabled" />
         </el-form-item>
@@ -126,7 +120,6 @@ const formRef = ref()
 const form = ref({
   name: '',
   original_name: '',
-  profile_id: '',
   provider_id: '',
   supports_func: false,
   supports_vision: false,
@@ -134,18 +127,18 @@ const form = ref({
   max_tokens: 4096,
   input_price: 0,
   output_price: 0,
+  rate_limit: 0,
   enabled: true,
 })
 
 const rules = {
   name: [{ required: true, message: t('message.inputRequired'), trigger: 'blur' }],
-  profile_id: [{ required: true, message: t('message.selectRequired'), trigger: 'change' }],
   provider_id: [{ required: true, message: t('message.selectRequired'), trigger: 'change' }],
 }
 
 function showAddDialog() {
   isEdit.value = false
-  form.value = { name: '', original_name: '', profile_id: '', provider_id: '', supports_func: false, supports_vision: false, context_window: 4096, max_tokens: 4096, input_price: 0, output_price: 0, enabled: true }
+  form.value = { name: '', original_name: '', provider_id: '', supports_func: false, supports_vision: false, context_window: 4096, max_tokens: 4096, input_price: 0, output_price: 0, rate_limit: 0, enabled: true }
   dialogVisible.value = true
 }
 
@@ -191,7 +184,6 @@ function confirmDelete(model) {
 }
 
 onMounted(() => {
-  store.fetchProfiles()
   store.fetchProviders()
   store.fetchModels()
 })
