@@ -122,7 +122,12 @@ func (lr *LossRecovery) DetectLoss(ctx context.Context, chunks []Chunk, chunkRes
 		}
 	}
 
-	_ = time.Since(startTime) // TODO: Track detection time
+	// Note: Timing metrics can be added here for monitoring in production
+	duration := time.Since(startTime)
+	if duration > 3*time.Second {
+		// Log slow loss detection operations
+		fmt.Printf("[WARN] Loss detection took %v for %d chunks\n", duration, len(chunks))
+	}
 
 	return lossInfo, nil
 }

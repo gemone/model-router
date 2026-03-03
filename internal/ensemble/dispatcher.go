@@ -17,17 +17,17 @@ const (
 
 // Dispatcher manages parallel model dispatching with worker pool
 type Dispatcher struct {
-	mu            sync.RWMutex
-	stats         map[string]*ModelStats
-	maxWorkers    int
-	chunkSize     int
+	mu         sync.RWMutex
+	stats      map[string]*ModelStats
+	maxWorkers int
+	chunkSize  int
 }
 
 // ModelStats tracks per-model performance metrics
 type ModelStats struct {
-	TotalCalls   int64
-	SuccessCalls int64
-	ErrorCalls   int64
+	TotalCalls    int64
+	SuccessCalls  int64
+	ErrorCalls    int64
 	TotalLatency  int64 // in milliseconds
 	LastError     string
 	LastUpdatedAt time.Time
@@ -185,7 +185,7 @@ func (d *Dispatcher) dispatchToAdapter(ctx context.Context, req *model.ChatCompl
 	clonedReq := d.cloneRequest(req)
 
 	// Execute the call
-	resp, err := adp.ChatCompletions(ctx, clonedReq)
+	resp, err := adp.ChatCompletion(ctx, clonedReq)
 	latency := time.Since(startTime).Milliseconds()
 
 	result.Latency = latency

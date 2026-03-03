@@ -10,6 +10,7 @@ import (
 	"github.com/gemone/model-router/internal/adapter"
 	"github.com/gemone/model-router/internal/compression"
 	"github.com/gemone/model-router/internal/model"
+	"github.com/gemone/model-router/internal/tokenizer"
 	"github.com/gemone/model-router/internal/vector"
 )
 
@@ -17,15 +18,17 @@ import (
 // Level 1: Parallel chunking (5x 200k)
 // Level 2: Small model compression (200k -> 20k)
 // Level 3: Vector embedding & loss detection
-// Level 4: Large model synthesis (5x20k -> 100k)
+// Level 4: Large model synthesis (5x 20k -> 100k)
 // Level 5: Vector-based loss recovery
 type Orchestrator struct {
-	dispatcher    *Dispatcher
-	synthesizer   *Synthesizer
-	lossRecovery  *LossRecovery
-	compressor    *compression.SlidingWindowCompression // For Level 2 compression
-	metrics       map[string]interface{}
-	metricsMutex  sync.RWMutex
+	dispatcher       *Dispatcher
+	synthesizer      *Synthesizer
+	lossRecovery     *LossRecovery
+	compressor       *compression.SlidingWindowCompression // For Level 2 compression
+	metrics          map[string]interface{}
+	metricsMutex     sync.RWMutex
+	templateRenderer TemplateRenderer // 模板渲染器
+	profileID        string           // Profile ID 用于获取自定义模板
 }
 
 // OrchestratorConfig configures the orchestrator behavior
@@ -40,14 +43,18 @@ type OrchestratorConfig struct {
 	EmbeddingFunc func(ctx context.Context, text string) ([]float32, error)
 
 	// Model configurations
-	SmallCompressionModel string  // Small model for compression (default: gpt-4o-mini)
-	LargeSynthesisModel   string  // Large model for synthesis (default: gpt-4-turbo)
+	SmallCompressionModel string // Small model for compression (default: gpt-4o-mini)
+	LargeSynthesisModel   string // Large model for synthesis (default: gpt-4-turbo)
 
 	// Pipeline configuration
-	ChunkSize             int     // Target tokens per chunk (default: 200k)
-	NumChunks             int     // Number of parallel chunks (default: 5)
-	MaxOutputTokens       int     // Maximum output tokens (default: 100k)
-	LossThreshold         float32 // Similarity threshold for loss detection (default: 0.85)
+	ChunkSize       int     // Target tokens per chunk (default: 200k)
+	NumChunks       int     // Number of parallel chunks (default: 5)
+	MaxOutputTokens int     // Maximum output tokens (default: 100k)
+	LossThreshold   float32 // Similarity threshold for loss detection (default: 0.85)
+
+	// Template configuration
+	TemplateRenderer TemplateRenderer // 模板渲染器（可选）
+	ProfileID        string           // Profile ID 用于获取自定义模板（可选）
 }
 
 // NewOrchestrator creates a new ensemble orchestrator
@@ -67,9 +74,11 @@ func NewOrchestrator(config *OrchestratorConfig) *Orchestrator {
 
 	// Create synthesizer (Level 4)
 	synthesizer := NewSynthesizer(&SynthesizerConfig{
-		Adapter:       config.Adapter,
-		SynthesisModel: config.LargeSynthesisModel,
-		MaxTokens:     config.MaxOutputTokens,
+		Adapter:          config.Adapter,
+		SynthesisModel:   config.LargeSynthesisModel,
+		MaxTokens:        config.MaxOutputTokens,
+		TemplateRenderer: config.TemplateRenderer,
+		ProfileID:        config.ProfileID,
 	})
 
 	// Create loss recovery (Level 3 & 5)
@@ -80,19 +89,35 @@ func NewOrchestrator(config *OrchestratorConfig) *Orchestrator {
 	})
 
 	return &Orchestrator{
-		dispatcher:   dispatcher,
-		synthesizer:  synthesizer,
-		lossRecovery: lossRecovery,
-		compressor:   compressor,
-		metrics:      make(map[string]interface{}),
+		dispatcher:       dispatcher,
+		synthesizer:      synthesizer,
+		lossRecovery:     lossRecovery,
+		compressor:       compressor,
+		metrics:          make(map[string]interface{}),
+		templateRenderer: config.TemplateRenderer,
+		profileID:        config.ProfileID,
 	}
+}
+
+// SetTemplateRenderer 设置模板渲染器
+func (o *Orchestrator) SetTemplateRenderer(renderer TemplateRenderer) {
+	o.templateRenderer = renderer
+	o.synthesizer.SetTemplateRenderer(renderer)
+	o.compressor.SetTemplateRenderer(renderer)
+}
+
+// SetProfileID 设置 Profile ID
+func (o *Orchestrator) SetProfileID(profileID string) {
+	o.profileID = profileID
+	o.synthesizer.SetProfileID(profileID)
+	o.compressor.SetProfileID(profileID)
 }
 
 // Process1MContext processes a large context through the 5-level hierarchical pipeline
 func (o *Orchestrator) Process1MContext(ctx context.Context, messages []model.Message) (*ProcessResult, error) {
 	if len(messages) == 0 {
 		return &ProcessResult{
-			Success: true,
+			Success:  true,
 			Messages: []model.Message{},
 			Metrics:  o.getMetricsSnapshot(),
 		}, nil
@@ -279,35 +304,12 @@ func (o *Orchestrator) getMetricsSnapshot() map[string]interface{} {
 
 // estimateMessagesTokens estimates total tokens for messages
 func (o *Orchestrator) estimateMessagesTokens(messages []model.Message) int {
-	total := 0
-	for i := range messages {
-		total += o.estimateMessageTokens(&messages[i])
-	}
-	return total
+	return tokenizer.CountTokensForMessages(messages)
 }
 
 // estimateMessageTokens estimates tokens for a single message
 func (o *Orchestrator) estimateMessageTokens(msg *model.Message) int {
-	content := o.contentToString(msg.Content)
-	return len(content)/4 + 10 // 10 tokens overhead per message
-}
-
-// contentToString converts message content to string
-func (o *Orchestrator) contentToString(content interface{}) string {
-	switch v := content.(type) {
-	case string:
-		return v
-	case []model.ContentPart:
-		var result string
-		for _, part := range v {
-			if part.Type == "text" {
-				result += part.Text + " "
-			}
-		}
-		return result
-	default:
-		return fmt.Sprintf("%v", content)
-	}
+	return tokenizer.CountTokensForMessage(msg)
 }
 
 // GetPipelineStatus returns the current status of all pipeline components

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gemone/model-router/internal/compression"
 	"github.com/gemone/model-router/internal/model"
+	"github.com/gemone/model-router/internal/tokenizer"
 )
 
 // Chunker handles Level 1 parallel chunking and Level 2 compression
@@ -62,7 +63,12 @@ func (c *Chunker) ProcessChunks(ctx context.Context, messages []model.Message) (
 	// Process chunks in parallel using Level 2: Small model compression
 	results := c.processChunksParallel(ctx, chunks)
 
-	_ = time.Since(startTime) // TODO: Track total time
+	// Note: Timing metrics can be added here for monitoring in production
+	duration := time.Since(startTime)
+	if duration > 5*time.Second {
+		// Log slow chunking operations
+		fmt.Printf("[WARN] Chunking took %v for %d messages\n", duration, len(messages))
+	}
 
 	return chunks, results, nil
 }
@@ -162,36 +168,12 @@ func (c *Chunker) processChunksParallel(ctx context.Context, chunks []Chunk) []C
 
 // estimateTotalTokens estimates total tokens across all messages
 func (c *Chunker) estimateTotalTokens(messages []model.Message) int {
-	total := 0
-	for i := range messages {
-		total += c.estimateMessageTokens(&messages[i])
-	}
-	return total
+	return tokenizer.CountTokensForMessages(messages)
 }
 
 // estimateMessageTokens estimates tokens for a single message
 func (c *Chunker) estimateMessageTokens(msg *model.Message) int {
-	// Rough estimation: ~4 chars per token for English text
-	content := c.contentToString(msg.Content)
-	return len(content)/4 + 10 // 10 tokens overhead per message
-}
-
-// contentToString converts message content to string
-func (c *Chunker) contentToString(content interface{}) string {
-	switch v := content.(type) {
-	case string:
-		return v
-	case []model.ContentPart:
-		var result string
-		for _, part := range v {
-			if part.Type == "text" {
-				result += part.Text + " "
-			}
-		}
-		return result
-	default:
-		return fmt.Sprintf("%v", content)
-	}
+	return tokenizer.CountTokensForMessage(msg)
 }
 
 // GetMetrics returns chunker performance metrics

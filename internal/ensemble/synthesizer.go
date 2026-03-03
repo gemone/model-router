@@ -8,20 +8,31 @@ import (
 
 	"github.com/gemone/model-router/internal/adapter"
 	"github.com/gemone/model-router/internal/model"
+	"github.com/gemone/model-router/internal/tokenizer"
 )
+
+// TemplateRenderer 定义模板渲染接口
+type TemplateRenderer interface {
+	Render(name string, profileID string, variables map[string]interface{}) (string, error)
+	RenderWithDefault(name string, profileID string, variables map[string]interface{}, defaultValue string) string
+}
 
 // Synthesizer handles Level 4 large model synthesis (5x 20k -> 100k)
 type Synthesizer struct {
-	adapter       adapter.Adapter
-	synthesisModel string          // Model for synthesis (large model)
-	maxTokens     int             // Maximum output tokens (default: 100k)
+	adapter          adapter.Adapter
+	synthesisModel   string           // Model for synthesis (large model)
+	maxTokens        int              // Maximum output tokens (default: 100k)
+	templateRenderer TemplateRenderer // 模板渲染器
+	profileID        string           // Profile ID 用于获取自定义模板
 }
 
 // SynthesizerConfig configures the synthesizer behavior
 type SynthesizerConfig struct {
-	Adapter       adapter.Adapter
-	SynthesisModel string         // Large model for synthesis
-	MaxTokens     int            // Maximum output tokens
+	Adapter          adapter.Adapter
+	SynthesisModel   string           // Large model for synthesis
+	MaxTokens        int              // Maximum output tokens
+	TemplateRenderer TemplateRenderer // 模板渲染器（可选）
+	ProfileID        string           // Profile ID 用于获取自定义模板（可选）
 }
 
 // NewSynthesizer creates a new synthesizer for combining compressed results
@@ -41,21 +52,47 @@ func NewSynthesizer(config *SynthesizerConfig) *Synthesizer {
 	}
 
 	return &Synthesizer{
-		adapter:       config.Adapter,
-		synthesisModel: synthesisModel,
-		maxTokens:     maxTokens,
+		adapter:          config.Adapter,
+		synthesisModel:   synthesisModel,
+		maxTokens:        maxTokens,
+		templateRenderer: config.TemplateRenderer,
+		profileID:        config.ProfileID,
 	}
+}
+
+// SetTemplateRenderer 设置模板渲染器
+func (s *Synthesizer) SetTemplateRenderer(renderer TemplateRenderer) {
+	s.templateRenderer = renderer
+}
+
+// SetProfileID 设置 Profile ID
+func (s *Synthesizer) SetProfileID(profileID string) {
+	s.profileID = profileID
 }
 
 // SynthesisResult represents the result of synthesis
 type SynthesisResult struct {
-	Messages        []model.Message      // Synthesized messages
-	Summary         string               // Overall summary if generated
-	TotalTokens     int                  // Total tokens in result
-	InputTokens     int                  // Total input tokens from chunks
-	ReductionRatio  float64              // Compression ratio achieved
-	Duration        time.Duration        // Time taken for synthesis
-	Metrics         map[string]interface{} // Level 4 metrics
+	Messages       []model.Message        // Synthesized messages
+	Summary        string                 // Overall summary if generated
+	TotalTokens    int                    // Total tokens in result
+	InputTokens    int                    // Total input tokens from chunks
+	ReductionRatio float64                // Compression ratio achieved
+	Duration       time.Duration          // Time taken for synthesis
+	Metrics        map[string]interface{} // Level 4 metrics
+}
+
+// ChunkInfo 用于模板渲染的块信息
+type ChunkInfo struct {
+	Index   int
+	Role    string
+	Content string
+}
+
+// SynthesisPromptData 合成提示词模板数据
+type SynthesisPromptData struct {
+	MaxOutputTokens int
+	Chunks          []ChunkInfo
+	Truncated       bool
 }
 
 // Synthesize combines multiple compressed chunk results into a unified result
@@ -97,12 +134,12 @@ func (s *Synthesizer) Synthesize(ctx context.Context, chunkResults []ChunkResult
 	// If within budget, return as-is
 	if currentTokens <= s.maxTokens {
 		return &SynthesisResult{
-			Messages:        allMessages,
-			TotalTokens:     currentTokens,
-			InputTokens:     totalInputTokens,
-			ReductionRatio:  float64(currentTokens) / float64(totalInputTokens),
-			Duration:        time.Since(startTime),
-			Metrics:         s.createMetrics(successCount, totalInputTokens, currentTokens, time.Since(startTime)),
+			Messages:       allMessages,
+			TotalTokens:    currentTokens,
+			InputTokens:    totalInputTokens,
+			ReductionRatio: float64(currentTokens) / float64(totalInputTokens),
+			Duration:       time.Since(startTime),
+			Metrics:        s.createMetrics(successCount, totalInputTokens, currentTokens, time.Since(startTime)),
 		}, nil
 	}
 
@@ -125,6 +162,9 @@ func (s *Synthesizer) performSynthesis(ctx context.Context, messages []model.Mes
 		return nil, fmt.Errorf("adapter required for synthesis")
 	}
 
+	// 获取系统提示词（使用模板或默认）
+	systemPrompt := s.getSystemPrompt()
+
 	// Build synthesis prompt
 	prompt := s.buildSynthesisPrompt(messages)
 
@@ -134,19 +174,19 @@ func (s *Synthesizer) performSynthesis(ctx context.Context, messages []model.Mes
 		Messages: []model.Message{
 			{
 				Role:    "system",
-				Content: "You are an expert at synthesizing compressed conversation summaries into coherent, unified context. Preserve all critical information, decisions, and action items while eliminating redundancy.",
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
 				Content: prompt,
 			},
 		},
-		MaxTokens:     s.maxTokens,
-		Temperature:   func() *float32 { t := float32(0.3); return &t }(),
+		MaxTokens:   s.maxTokens,
+		Temperature: func() *float32 { t := float32(0.3); return &t }(),
 	}
 
 	// Call the large model for synthesis
-	response, err := s.adapter.ChatCompletions(ctx, synthesisRequest)
+	response, err := s.adapter.ChatCompletion(ctx, synthesisRequest)
 	if err != nil {
 		return nil, fmt.Errorf("synthesis request failed: %w", err)
 	}
@@ -169,16 +209,86 @@ func (s *Synthesizer) performSynthesis(ctx context.Context, messages []model.Mes
 	synthesizedMessages := s.parseSynthesis(synthesis)
 
 	return &SynthesisResult{
-		Messages:        synthesizedMessages,
-		Summary:         synthesis,
-		TotalTokens:     s.estimateTokens(synthesis),
-		InputTokens:     inputTokens,
-		ReductionRatio:  float64(s.estimateTokens(synthesis)) / float64(inputTokens),
+		Messages:       synthesizedMessages,
+		Summary:        synthesis,
+		TotalTokens:    s.estimateTokens(synthesis),
+		InputTokens:    inputTokens,
+		ReductionRatio: float64(s.estimateTokens(synthesis)) / float64(inputTokens),
 	}, nil
+}
+
+// getSystemPrompt 获取系统提示词
+func (s *Synthesizer) getSystemPrompt() string {
+	defaultPrompt := "You are an expert at synthesizing compressed conversation summaries into coherent, unified context. Preserve all critical information, decisions, and action items while eliminating redundancy."
+
+	if s.templateRenderer == nil {
+		return defaultPrompt
+	}
+
+	return s.templateRenderer.RenderWithDefault(
+		model.TemplateSynthesisSystem,
+		s.profileID,
+		nil,
+		defaultPrompt,
+	)
 }
 
 // buildSynthesisPrompt creates a prompt for synthesizing compressed chunks
 func (s *Synthesizer) buildSynthesisPrompt(messages []model.Message) string {
+	// 如果使用模板渲染器，尝试使用模板
+	if s.templateRenderer != nil {
+		data := s.buildPromptData(messages)
+		rendered, err := s.templateRenderer.Render(model.TemplateSynthesisUserPrompt, s.profileID, map[string]interface{}{
+			"MaxOutputTokens": data.MaxOutputTokens,
+			"Chunks":          data.Chunks,
+			"Truncated":       data.Truncated,
+		})
+		if err == nil {
+			return rendered
+		}
+		// 模板渲染失败，使用默认构建
+	}
+
+	return s.buildDefaultSynthesisPrompt(messages)
+}
+
+// buildPromptData 构建提示词模板数据
+func (s *Synthesizer) buildPromptData(messages []model.Message) *SynthesisPromptData {
+	data := &SynthesisPromptData{
+		MaxOutputTokens: 100000,
+		Chunks:          make([]ChunkInfo, 0),
+		Truncated:       false,
+	}
+
+	// Add messages (may include summaries from compression)
+	includedTokens := 0
+	maxInputTokens := 150000 // Cap input to synthesis model
+
+	for i, msg := range messages {
+		msgTokens := s.estimateMessageTokens(&msg)
+		if includedTokens+msgTokens > maxInputTokens && i > 0 {
+			data.Truncated = true
+			break
+		}
+
+		content := tokenizer.ContentToString(msg.Content)
+		if len(content) > 5000 {
+			content = content[:4970] + "...\n[truncated]"
+		}
+
+		data.Chunks = append(data.Chunks, ChunkInfo{
+			Index:   i + 1,
+			Role:    msg.Role,
+			Content: content,
+		})
+		includedTokens += msgTokens
+	}
+
+	return data
+}
+
+// buildDefaultSynthesisPrompt 构建默认合成提示词
+func (s *Synthesizer) buildDefaultSynthesisPrompt(messages []model.Message) string {
 	var sb strings.Builder
 
 	sb.WriteString("Synthesize the following compressed conversation chunks into a unified, coherent summary.\n\n")
@@ -201,7 +311,7 @@ func (s *Synthesizer) buildSynthesisPrompt(messages []model.Message) string {
 			break
 		}
 
-		content := s.contentToString(msg.Content)
+		content := tokenizer.ContentToString(msg.Content)
 		if len(content) > 5000 {
 			content = content[:4970] + "...\n[truncated]"
 		}
@@ -243,63 +353,37 @@ func (s *Synthesizer) fallbackSynthesis(messages []model.Message, inputTokens in
 	}
 
 	return &SynthesisResult{
-		Messages:        result,
-		TotalTokens:     tokenCount,
-		InputTokens:     inputTokens,
-		ReductionRatio:  float64(tokenCount) / float64(inputTokens),
-		Duration:        time.Since(startTime),
-		Metrics:         s.createMetrics(len(messages), inputTokens, tokenCount, time.Since(startTime)),
+		Messages:       result,
+		TotalTokens:    tokenCount,
+		InputTokens:    inputTokens,
+		ReductionRatio: float64(tokenCount) / float64(inputTokens),
+		Duration:       time.Since(startTime),
+		Metrics:        s.createMetrics(len(messages), inputTokens, tokenCount, time.Since(startTime)),
 	}, nil
 }
 
 // estimateMessagesTokens estimates total tokens for messages
 func (s *Synthesizer) estimateMessagesTokens(messages []model.Message) int {
-	total := 0
-	for i := range messages {
-		total += s.estimateMessageTokens(&messages[i])
-	}
-	return total
+	return tokenizer.CountTokensForMessages(messages)
 }
 
 // estimateMessageTokens estimates tokens for a single message
 func (s *Synthesizer) estimateMessageTokens(msg *model.Message) int {
-	content := s.contentToString(msg.Content)
-	return len(content)/4 + 10
+	return tokenizer.CountTokensForMessage(msg)
 }
 
 // estimateTokens estimates tokens for a string
 func (s *Synthesizer) estimateTokens(text string) int {
-	if text == "" {
-		return 0
-	}
-	return len(text) / 4
-}
-
-// contentToString converts message content to string
-func (s *Synthesizer) contentToString(content interface{}) string {
-	switch v := content.(type) {
-	case string:
-		return v
-	case []model.ContentPart:
-		var result string
-		for _, part := range v {
-			if part.Type == "text" {
-				result += part.Text + " "
-			}
-		}
-		return result
-	default:
-		return fmt.Sprintf("%v", content)
-	}
+	return tokenizer.CountTokens(text)
 }
 
 // createMetrics creates Level 4 metrics
 func (s *Synthesizer) createMetrics(inputChunks int, inputTokens int, outputTokens int, duration time.Duration) map[string]interface{} {
 	metrics := map[string]interface{}{
-		"level4_input_chunks":      inputChunks,
-		"level4_input_tokens":      inputTokens,
-		"level4_output_tokens":     outputTokens,
-		"level4_duration_ms":       duration.Milliseconds(),
+		"level4_input_chunks":  inputChunks,
+		"level4_input_tokens":  inputTokens,
+		"level4_output_tokens": outputTokens,
+		"level4_duration_ms":   duration.Milliseconds(),
 	}
 
 	if inputTokens > 0 {

@@ -19,9 +19,9 @@ func newMockEnsembleAdapter() *mockEnsembleAdapter {
 
 type mockEnsembleAdapter struct{}
 
-func (m *mockEnsembleAdapter) Name() string                          { return "mock-ensemble" }
-func (m *mockEnsembleAdapter) Type() model.ProviderType             { return model.ProviderOpenAI }
-func (m *mockEnsembleAdapter) Init(config *model.Provider) error    { return nil }
+func (m *mockEnsembleAdapter) Name() string                      { return "mock-ensemble" }
+func (m *mockEnsembleAdapter) Type() model.ProviderType          { return model.ProviderOpenAI }
+func (m *mockEnsembleAdapter) Init(config *model.Provider) error { return nil }
 func (m *mockEnsembleAdapter) ChatCompletion(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
 	return &model.ChatCompletionResponse{
 		ID:      "test-" + time.Now().Format("20060102150405"),
@@ -44,9 +44,6 @@ func (m *mockEnsembleAdapter) ChatCompletion(ctx context.Context, req *model.Cha
 			TotalTokens:      150,
 		},
 	}, nil
-}
-func (m *mockEnsembleAdapter) ChatCompletions(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
-	return m.ChatCompletion(ctx, req)
 }
 func (m *mockEnsembleAdapter) ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error) {
 	return nil, nil
@@ -140,7 +137,7 @@ func TestChunker(t *testing.T) {
 
 	chunker := NewChunker(&ChunkerConfig{
 		ChunkSize:  100, // Small chunk size for testing
-		NumChunks: 3,
+		NumChunks:  3,
 		Compressor: compressor,
 	})
 
@@ -368,10 +365,6 @@ func (w wrappedAdapter) ChatCompletion(ctx context.Context, req *model.ChatCompl
 	return w.adapter.ChatCompletion(ctx, req)
 }
 
-func (w wrappedAdapter) ChatCompletions(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
-	return w.adapter.ChatCompletion(ctx, req)
-}
-
 func (w wrappedAdapter) ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error) {
 	return nil, nil
 }
@@ -396,11 +389,17 @@ func (w wrappedAdapter) Init(config *model.Provider) error { return nil }
 
 func (w wrappedAdapter) GetRequestHeaders() map[string]string { return nil }
 
-func (w wrappedAdapter) ConvertRequest(req *model.ChatCompletionRequest) (interface{}, error) { return req, nil }
+func (w wrappedAdapter) ConvertRequest(req *model.ChatCompletionRequest) (interface{}, error) {
+	return req, nil
+}
 
-func (w wrappedAdapter) ConvertResponse(resp []byte) (*model.ChatCompletionResponse, error) { return nil, nil }
+func (w wrappedAdapter) ConvertResponse(resp []byte) (*model.ChatCompletionResponse, error) {
+	return nil, nil
+}
 
-func (w wrappedAdapter) ConvertStreamResponse(data []byte) (*model.ChatCompletionStreamResponse, error) { return nil, nil }
+func (w wrappedAdapter) ConvertStreamResponse(data []byte) (*model.ChatCompletionStreamResponse, error) {
+	return nil, nil
+}
 
 func (w wrappedAdapter) DoRequest(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
 	return &http.Response{StatusCode: 200}, nil
