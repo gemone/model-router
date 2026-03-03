@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gemone/model-router/internal/adapter"
+	"github.com/gemone/model-router/internal/middleware"
 	"github.com/gemone/model-router/internal/model"
 )
 
@@ -20,21 +21,25 @@ const (
 	DefaultSummaryMaxTokens = 20000
 	// SummaryModel is the default model to use for summarization (small, fast model)
 	SummaryModel = "gpt-4o-mini"
+	// MaxSummaryInputTokens is the maximum tokens for summarization input
+	MaxSummaryInputTokens = 200000
 )
 
 // SlidingWindowCompression implements sliding window with summary compression
 type SlidingWindowCompression struct {
-	adapter      adapter.Adapter
-	summaryModel string
+	adapter          adapter.Adapter
+	summaryModel     string
+	templateRenderer TemplateRenderer // 模板渲染器
+	profileID        string           // Profile ID 用于获取自定义模板
 }
 
 // CompressedContext represents the result of compression
 type CompressedContext struct {
-	Messages       []model.Message `json:"messages"`
-	Summary        string          `json:"summary,omitempty"`
-	OriginalTokens int             `json:"original_tokens"`
-	CompressedTokens int           `json:"compressed_tokens"`
-	CompressionRatio float64       `json:"compression_ratio"`
+	Messages         []model.Message `json:"messages"`
+	Summary          string          `json:"summary,omitempty"`
+	OriginalTokens   int             `json:"original_tokens"`
+	CompressedTokens int             `json:"compressed_tokens"`
+	CompressionRatio float64         `json:"compression_ratio"`
 }
 
 // NewSlidingWindowCompression creates a new sliding window compression instance
@@ -50,6 +55,16 @@ func (s *SlidingWindowCompression) SetSummaryModel(modelName string) {
 	s.summaryModel = modelName
 }
 
+// SetTemplateRenderer 设置模板渲染器
+func (s *SlidingWindowCompression) SetTemplateRenderer(renderer TemplateRenderer) {
+	s.templateRenderer = renderer
+}
+
+// SetProfileID 设置 Profile ID
+func (s *SlidingWindowCompression) SetProfileID(profileID string) {
+	s.profileID = profileID
+}
+
 // Compress compresses the session context using sliding window with summary compression
 // Keeps last 40k tokens raw, summarizes older content (200k -> 20k, 10:1 ratio)
 func (s *SlidingWindowCompression) Compress(ctx context.Context, session *model.Session, messages []model.Message, maxTokens int) (*CompressedContext, error) {
@@ -58,8 +73,8 @@ func (s *SlidingWindowCompression) Compress(ctx context.Context, session *model.
 	}
 	if len(messages) == 0 {
 		return &CompressedContext{
-			Messages:       messages,
-			OriginalTokens: 0,
+			Messages:         messages,
+			OriginalTokens:   0,
 			CompressedTokens: 0,
 			CompressionRatio: 1.0,
 		}, nil
@@ -148,20 +163,23 @@ func (s *SlidingWindowCompression) summarizeMessages(ctx context.Context, messag
 	// Build summarization prompt
 	prompt := s.buildSummaryPrompt(messages)
 
+	// Get system prompt
+	systemPrompt := s.getSummarySystemPrompt()
+
 	// Create summary request
-	summaryRequest := &adapter.ChatCompletionRequest{
+	summaryRequest := &model.ChatCompletionRequest{
 		Model: s.summaryModel,
 		Messages: []model.Message{
 			{
 				Role:    "system",
-				Content: "You are a helpful assistant that summarizes conversations concisely while preserving important context, decisions, and action items.",
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
 				Content: prompt,
 			},
 		},
-		MaxTokens: DefaultSummaryMaxTokens,
+		MaxTokens:   DefaultSummaryMaxTokens,
 		Temperature: func() *float32 { t := float32(0.3); return &t }(),
 	}
 
@@ -187,8 +205,91 @@ func (s *SlidingWindowCompression) summarizeMessages(ctx context.Context, messag
 	return summary, nil
 }
 
+// getSummarySystemPrompt 获取摘要系统提示词
+func (s *SlidingWindowCompression) getSummarySystemPrompt() string {
+	defaultPrompt := "You are a helpful assistant that summarizes conversations concisely while preserving important context, decisions, and action items."
+
+	if s.templateRenderer == nil {
+		return defaultPrompt
+	}
+
+	// 尝试从模板渲染
+	rendered, err := s.templateRenderer.Render(model.TemplateSummarySystem, s.profileID, nil)
+	if err == nil && rendered != "" {
+		return rendered
+	}
+	// Log template render error for monitoring
+	if err != nil {
+		middleware.WarnLog("Summary system prompt template render failed for profile %s: %v", s.profileID, err)
+	}
+
+	return defaultPrompt
+}
+
+// SummaryMessageInfo 用于模板渲染的摘要消息信息
+type SummaryMessageInfo struct {
+	Role    string
+	Content string
+}
+
+// SummaryPromptData 摘要提示词模板数据
+type SummaryPromptData struct {
+	MaxOutputTokens int
+	Messages        []SummaryMessageInfo
+	Truncated       bool
+}
+
 // buildSummaryPrompt creates a prompt for summarizing messages
 func (s *SlidingWindowCompression) buildSummaryPrompt(messages []model.Message) string {
+	// 如果使用模板渲染器，尝试使用模板
+	if s.templateRenderer != nil {
+		data := s.buildSummaryPromptData(messages)
+		rendered, err := s.templateRenderer.Render(model.TemplateSummaryUserPrompt, s.profileID, map[string]interface{}{
+			"MaxOutputTokens": data.MaxOutputTokens,
+			"Messages":        data.Messages,
+			"Truncated":       data.Truncated,
+		})
+		if err == nil {
+			return rendered
+		}
+		// Log template render error for monitoring
+		middleware.WarnLog("Summary user prompt template render failed for profile %s: %v", s.profileID, err)
+	}
+
+	return s.buildDefaultSummaryPrompt(messages)
+}
+
+// buildSummaryPromptData 构建摘要提示词数据
+func (s *SlidingWindowCompression) buildSummaryPromptData(messages []model.Message) *SummaryPromptData {
+	data := &SummaryPromptData{
+		MaxOutputTokens: 2000,
+		Messages:        make([]SummaryMessageInfo, 0),
+		Truncated:       false,
+	}
+
+	// Include messages (truncate if too long)
+	includedTokens := 0
+	maxInputTokens := MaxSummaryInputTokens // Max tokens for summarization input
+
+	for _, msg := range messages {
+		msgTokens := s.estimateMessageTokens(&msg)
+		if includedTokens+msgTokens > maxInputTokens {
+			data.Truncated = true
+			break
+		}
+
+		data.Messages = append(data.Messages, SummaryMessageInfo{
+			Role:    msg.Role,
+			Content: s.truncateContent(msg.Content, 1000),
+		})
+		includedTokens += msgTokens
+	}
+
+	return data
+}
+
+// buildDefaultSummaryPrompt 构建默认摘要提示词
+func (s *SlidingWindowCompression) buildDefaultSummaryPrompt(messages []model.Message) string {
 	var sb strings.Builder
 
 	sb.WriteString("Summarize the following conversation history concisely (maximum 2000 tokens).\n\n")
@@ -201,7 +302,7 @@ func (s *SlidingWindowCompression) buildSummaryPrompt(messages []model.Message) 
 
 	// Include messages (truncate if too long)
 	includedTokens := 0
-	maxInputTokens := 200000 // 200k tokens max for summarization input
+	maxInputTokens := MaxSummaryInputTokens // Max tokens for summarization input
 
 	for _, msg := range messages {
 		msgTokens := s.estimateMessageTokens(&msg)
@@ -244,55 +345,22 @@ func (s *SlidingWindowCompression) fallbackCompression(messages []model.Message,
 
 // estimateMessagesTokens estimates total tokens for all messages
 func (s *SlidingWindowCompression) estimateMessagesTokens(messages []model.Message) int {
-	total := 0
-	for i := range messages {
-		total += s.estimateMessageTokens(&messages[i])
-	}
-	return total
+	return estimateTokensForMessages(messages)
 }
 
 // estimateMessageTokens estimates tokens for a single message
 func (s *SlidingWindowCompression) estimateMessageTokens(msg *model.Message) int {
-	// Rough estimation: ~4 chars per token for English text
-	// Add overhead for role and other metadata
-	content := s.contentToString(msg.Content)
-	return len(content)/4 + 10 // 10 tokens overhead per message
+	return estimateTokensForMessage(msg)
 }
 
 // estimateTokens estimates tokens for a string
 func (s *SlidingWindowCompression) estimateTokens(text string) int {
-	if text == "" {
-		return 0
-	}
-	return len(text) / 4
-}
-
-// contentToString converts message content to string
-func (s *SlidingWindowCompression) contentToString(content interface{}) string {
-	switch v := content.(type) {
-	case string:
-		return v
-	case []model.ContentPart:
-		var sb strings.Builder
-		for _, part := range v {
-			if part.Type == "text" {
-				sb.WriteString(part.Text)
-				sb.WriteString(" ")
-			}
-		}
-		return sb.String()
-	default:
-		return fmt.Sprintf("%v", content)
-	}
+	return estimateTokensForText(text)
 }
 
 // truncateContent truncates content to maximum characters
 func (s *SlidingWindowCompression) truncateContent(content interface{}, maxChars int) string {
-	str := s.contentToString(content)
-	if len(str) <= maxChars {
-		return str
-	}
-	return str[:maxChars] + "..."
+	return truncateContent(content, maxChars)
 }
 
 // GetTokenBudget calculates the token budget based on context window

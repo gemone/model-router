@@ -11,8 +11,10 @@ import (
 
 // SlidingWindowStrategy implements Strategy interface for sliding window compression
 type SlidingWindowStrategy struct {
-	compressor *SlidingWindowCompression
-	adapter    adapter.Adapter
+	compressor       *SlidingWindowCompression
+	adapter          adapter.Adapter
+	templateRenderer TemplateRenderer // 模板渲染器
+	profileID        string           // Profile ID 用于获取自定义模板
 }
 
 // NewSlidingWindowStrategy creates a new sliding window strategy
@@ -21,6 +23,32 @@ func NewSlidingWindowStrategy(adapter adapter.Adapter) *SlidingWindowStrategy {
 		compressor: NewSlidingWindowCompression(adapter),
 		adapter:    adapter,
 	}
+}
+
+// NewSlidingWindowStrategyWithTemplate creates a new sliding window strategy with template support
+func NewSlidingWindowStrategyWithTemplate(adapter adapter.Adapter, templateRenderer TemplateRenderer, profileID string) *SlidingWindowStrategy {
+	compressor := NewSlidingWindowCompression(adapter)
+	compressor.SetTemplateRenderer(templateRenderer)
+	compressor.SetProfileID(profileID)
+
+	return &SlidingWindowStrategy{
+		compressor:       compressor,
+		adapter:          adapter,
+		templateRenderer: templateRenderer,
+		profileID:        profileID,
+	}
+}
+
+// SetTemplateRenderer 设置模板渲染器
+func (s *SlidingWindowStrategy) SetTemplateRenderer(renderer TemplateRenderer) {
+	s.templateRenderer = renderer
+	s.compressor.SetTemplateRenderer(renderer)
+}
+
+// SetProfileID 设置 Profile ID
+func (s *SlidingWindowStrategy) SetProfileID(profileID string) {
+	s.profileID = profileID
+	s.compressor.SetProfileID(profileID)
 }
 
 // Name returns the strategy name

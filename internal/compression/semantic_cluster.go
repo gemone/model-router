@@ -10,6 +10,9 @@ import (
 )
 
 // SemanticClustering implements similarity-based message clustering for compression
+// NOTE: This is experimental and not yet integrated with the main compression pipeline.
+// It defines its own Session and CompressedResult types which differ from the standard
+// model.Session and CompressedContext types used elsewhere in the compression package.
 type SemanticClustering struct {
 	similarityThreshold float64 // Threshold for considering messages similar (0-1)
 	tokenBudgetRatio    float64 // Ratio of context window to use for compressed output
@@ -298,21 +301,21 @@ func (sc *SemanticClustering) extractKeyPoints(messages []model.Message) []strin
 // splitSentences roughly splits text into sentences
 func (sc *SemanticClustering) splitSentences(text string) []string {
 	var sentences []string
-	current := ""
+	var builder strings.Builder
 
 	for _, r := range text {
-		current += string(r)
+		builder.WriteRune(r)
 		if r == '.' || r == '!' || r == '?' {
-			s := strings.TrimSpace(current)
+			s := strings.TrimSpace(builder.String())
 			if len(s) > 0 {
 				sentences = append(sentences, s)
 			}
-			current = ""
+			builder.Reset()
 		}
 	}
 
 	// Add remaining text
-	if s := strings.TrimSpace(current); len(s) > 0 {
+	if s := strings.TrimSpace(builder.String()); len(s) > 0 {
 		sentences = append(sentences, s)
 	}
 

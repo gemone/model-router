@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gemone/model-router/internal/adapter"
 	"github.com/gemone/model-router/internal/model"
 )
 
@@ -15,7 +16,7 @@ type mockExpertAdapter struct {
 }
 
 func (m *mockExpertAdapter) Name() string                      { return "mock-expert" }
-func (m *mockExpertAdapter) Type() model.ProviderType             { return model.ProviderOpenAI }
+func (m *mockExpertAdapter) Type() model.ProviderType          { return model.ProviderOpenAI }
 func (m *mockExpertAdapter) Init(config *model.Provider) error { return nil }
 func (m *mockExpertAdapter) ChatCompletion(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
 	m.lastPrompt = req.Messages[1].Content.(string)
@@ -51,9 +52,6 @@ func (m *mockExpertAdapter) ChatCompletion(ctx context.Context, req *model.ChatC
 		},
 	}, nil
 }
-func (m *mockExpertAdapter) ChatCompletions(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
-	return m.ChatCompletion(ctx, req)
-}
 func (m *mockExpertAdapter) ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error) {
 	return nil, nil
 }
@@ -86,7 +84,7 @@ func (m *mockExpertAdapter) DoRequest(ctx context.Context, method, path string, 
 type mockWorkerAdapter struct{}
 
 func (m *mockWorkerAdapter) Name() string                      { return "mock-worker" }
-func (m *mockWorkerAdapter) Type() model.ProviderType             { return model.ProviderOpenAI }
+func (m *mockWorkerAdapter) Type() model.ProviderType          { return model.ProviderOpenAI }
 func (m *mockWorkerAdapter) Init(config *model.Provider) error { return nil }
 func (m *mockWorkerAdapter) ChatCompletion(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
 	return &model.ChatCompletionResponse{
@@ -99,9 +97,6 @@ func (m *mockWorkerAdapter) ChatCompletion(ctx context.Context, req *model.ChatC
 			},
 		},
 	}, nil
-}
-func (m *mockWorkerAdapter) ChatCompletions(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
-	return m.ChatCompletion(ctx, req)
 }
 func (m *mockWorkerAdapter) ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error) {
 	return nil, nil
@@ -158,7 +153,10 @@ func TestCascadeStrategy(t *testing.T) {
 	}
 
 	// Test compression
-	compressed, tokens, err := strategy.Compress(messages, 5000)
+	getAdapter := func(ctx context.Context) (adapter.Adapter, error) {
+		return worker, nil
+	}
+	compressed, tokens, err := strategy.Compress(context.Background(), messages, 5000, getAdapter)
 	if err != nil {
 		t.Fatalf("Cascade compress failed: %v", err)
 	}
@@ -197,10 +195,10 @@ func TestCascadeCompression(t *testing.T) {
 	worker := &mockWorkerAdapter{}
 
 	cascade := NewCascadeCompression(&CascadeCompressionConfig{
-		ExpertAdapter:    expert,
-		WorkerAdapter:    worker,
-		ExpertModel:      "gpt-4-turbo",
-		WorkerModel:      "gpt-3.5-turbo",
+		ExpertAdapter:     expert,
+		WorkerAdapter:     worker,
+		ExpertModel:       "gpt-4-turbo",
+		WorkerModel:       "gpt-3.5-turbo",
 		MaxOptimizeTokens: 5000,
 	})
 
@@ -311,13 +309,13 @@ func TestCalculateQualityMetrics(t *testing.T) {
 	}
 
 	result := &CascadeResult{
-		OriginalMessages:    messages,
-		OptimizedContext:    "Task: Deployment strategy. Decision: Use Docker and K8s.",
-		OptimizedPrompt:     "Context: Deployment decided. Request: Next steps?",
-		OriginalTokens:     100,
-		OptimizedTokens:    50,
-		CompressionRatio:   0.5,
-		QualityScore:       0.8,
+		OriginalMessages: messages,
+		OptimizedContext: "Task: Deployment strategy. Decision: Use Docker and K8s.",
+		OptimizedPrompt:  "Context: Deployment decided. Request: Next steps?",
+		OriginalTokens:   100,
+		OptimizedTokens:  50,
+		CompressionRatio: 0.5,
+		QualityScore:     0.8,
 	}
 
 	metrics := CalculateQualityMetrics(messages, result)

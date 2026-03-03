@@ -15,8 +15,8 @@ type MockAdapter struct {
 	lastRequest    *model.ChatCompletionRequest
 }
 
-func (m *MockAdapter) Name() string                 { return "mock" }
-func (m *MockAdapter) Type() model.ProviderType    { return model.ProviderOpenAI }
+func (m *MockAdapter) Name() string                      { return "mock" }
+func (m *MockAdapter) Type() model.ProviderType          { return model.ProviderOpenAI }
 func (m *MockAdapter) Init(config *model.Provider) error { return nil }
 func (m *MockAdapter) ChatCompletion(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
 	m.compressCalled = true
@@ -31,9 +31,6 @@ func (m *MockAdapter) ChatCompletion(ctx context.Context, req *model.ChatComplet
 			},
 		},
 	}, nil
-}
-func (m *MockAdapter) ChatCompletions(ctx context.Context, req *model.ChatCompletionRequest) (*model.ChatCompletionResponse, error) {
-	return m.ChatCompletion(ctx, req)
 }
 func (m *MockAdapter) ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error) {
 	return nil, nil
