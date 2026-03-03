@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,28 +17,23 @@ import (
 	compressionservice "github.com/gemone/model-router/internal/service/compression"
 )
 
-// containsString 检查字符串是否在字符串切片中
-func containsString(slice []string, item string) bool {
-	return slices.Contains(slice, item)
-}
-
 // ProfileInstance Profile 实例
 type ProfileInstance struct {
 	sync.RWMutex
-	Profile              *model.Profile
-	adapters             map[string]adapter.Adapter // providerID -> adapter
-	providerMap          map[string]*model.Provider // providerID -> provider
-	modelMap             map[string][]*model.Model  // modelName -> models
-	routeMap             map[string]*RouteInstance  // routeID -> route (NEW: route-based access)
-	stats                *StatsCollector
+	Profile     *model.Profile
+	adapters    map[string]adapter.Adapter // providerID -> adapter
+	providerMap map[string]*model.Provider // providerID -> provider
+	modelMap    map[string][]*model.Model  // modelName -> models
+	routeMap    map[string]*RouteInstance  // routeID -> route (NEW: route-based access)
+	stats       *StatsCollector
 	// DEPRECATED: Use compressionService instead (kept for backward compatibility during v3 refactoring)
-	compressionPipeline  *compressionpkg.CompressionPipeline
+	compressionPipeline *compressionpkg.CompressionPipeline
 	// DEPRECATED: Use compressionService.GetSelector() instead (kept for backward compatibility)
-	CompressionSelector  *repository.CompressionGroupSelector
+	CompressionSelector *repository.CompressionGroupSelector
 	// NEW: Independent compression service
-	compressionService   compressionservice.Service
-	compositeModels      map[string]*model.CompositeAutoModel // compositeModelName -> composite model
-	compositeService     *CompositeService                  // Composite service for routing
+	compressionService compressionservice.Service
+	compositeModels    map[string]*model.CompositeAutoModel // compositeModelName -> composite model
+	compositeService   *CompositeService                    // Composite service for routing
 }
 
 // ProfileManager Profile 管理器
@@ -107,11 +101,11 @@ func (pm *ProfileManager) loadFromDB_unlocked() error {
 		p := &profiles[i]
 		if p.Enabled {
 			instance := &ProfileInstance{
-				Profile:            p,
-				adapters:           make(map[string]adapter.Adapter),
-				providerMap:        make(map[string]*model.Provider),
-				modelMap:           make(map[string][]*model.Model),
-				stats:              GetStatsCollector(),
+				Profile:             p,
+				adapters:            make(map[string]adapter.Adapter),
+				providerMap:         make(map[string]*model.Provider),
+				modelMap:            make(map[string][]*model.Model),
+				stats:               GetStatsCollector(),
 				compressionPipeline: compressionpkg.NewPipeline(), // DEPRECATED: kept for backward compatibility
 			}
 			instance.loadData()
@@ -497,11 +491,11 @@ func (pm *ProfileManager) loadProfile_unlocked(p *model.Profile) error {
 	}
 
 	instance := &ProfileInstance{
-		Profile:            p,
-		adapters:           make(map[string]adapter.Adapter),
-		providerMap:        make(map[string]*model.Provider),
-		modelMap:           make(map[string][]*model.Model),
-		stats:              GetStatsCollector(),
+		Profile:             p,
+		adapters:            make(map[string]adapter.Adapter),
+		providerMap:         make(map[string]*model.Provider),
+		modelMap:            make(map[string][]*model.Model),
+		stats:               GetStatsCollector(),
 		compressionPipeline: compressionpkg.NewPipeline(), // DEPRECATED: kept for backward compatibility
 	}
 	instance.loadData()

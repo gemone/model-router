@@ -47,23 +47,16 @@ func (s *PrioritySelector) Select(models []*model.Model, metrics map[string]*mod
 		return models[0]
 	}
 
-	// Build priority map
-	providerPriority := make(map[string]int)
-	for _, p := range providers {
-		providerPriority[p.ID] = p.Priority
-	}
-
-	// Select model with highest provider priority
+	// In the new architecture, priority is configured at Route level, not Provider level.
+	// For direct model selection (not through Route), all models have equal priority.
+	// Select first enabled model.
 	var bestModel *model.Model
-	bestPriority := math.MinInt
 
 	for _, m := range models {
 		if !m.Enabled {
 			continue
 		}
-		priority := providerPriority[m.ProviderID]
-		if priority > bestPriority {
-			bestPriority = priority
+		if bestModel == nil {
 			bestModel = m
 		}
 	}
@@ -119,17 +112,11 @@ func (s *WeightedSelector) Select(models []*model.Model, metrics map[string]*mod
 		return models[0]
 	}
 
-	// Build weight map
-	providerWeight := make(map[string]int)
-	for _, p := range providers {
-		weight := p.Weight
-		if weight <= 0 {
-			weight = 100
-		}
-		providerWeight[p.ID] = weight
-	}
+	// In the new architecture, weight is configured at Route level, not Provider level.
+	// For direct model selection (not through Route), all models have equal weight.
+	// Use simple round-robin selection.
 
-	// Collect enabled models with their weights
+	// Collect enabled models
 	type weightedModel struct {
 		model  *model.Model
 		weight int
@@ -142,7 +129,9 @@ func (s *WeightedSelector) Select(models []*model.Model, metrics map[string]*mod
 		if !m.Enabled {
 			continue
 		}
-		weight := providerWeight[m.ProviderID]
+		// In the new architecture, weight is configured at Route level.
+		// For direct model selection, use equal weight (100).
+		weight := 100
 		weightedModels = append(weightedModels, weightedModel{model: m, weight: weight})
 		totalWeight += weight
 	}
@@ -440,8 +429,9 @@ func (s *DefaultModelSelector) SelectModel(
 	// Collect metrics for all models
 	metrics := s.collectMetrics(ctx, modelPtrs)
 
-	// Determine strategy from profile (default to auto)
-	strategy := profile.DefaultRouteStrategy
+	// In the new architecture, strategy is determined at Route level.
+	// For direct model selection, use auto strategy.
+	strategy := model.RouteStrategyAuto
 	if strategy == "" {
 		strategy = model.RouteStrategyAuto
 	}
@@ -467,17 +457,14 @@ func (s *DefaultModelSelector) SelectModelsWithStrategy(
 	models []*model.Model,
 	strategy model.RouteStrategy,
 ) *model.Model {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	if len(models) == 0 {
 		return nil
 	}
 
-	// Collect metrics
+	// Collect metrics (no lock needed for this operation)
 	metrics := s.collectMetrics(ctx, models)
 
-	// Get selector for strategy
+	// Get selector for strategy (getSelector handles its own locking)
 	selector := s.getSelector(strategy)
 	if selector == nil {
 		selector = &AutoSelector{}

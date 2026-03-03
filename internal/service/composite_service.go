@@ -224,14 +224,16 @@ func (r *CompositeRouter) routeParallel(ctx context.Context, profile *ProfileIns
 
 // routeByContent analyzes content to select best backend
 func (r *CompositeRouter) routeByContent(ctx context.Context, profile *ProfileInstance, composite *model.CompositeAutoModel, stats *StatsCollector) (*RouteResult, error) {
-	// For MVP: use cascade routing
-	// TODO: Implement content analysis using router.ContentAnalyzer
+	// For MVP: use cascade routing as fallback
+	// Future: Implement content analysis using router.ContentAnalyzer
+	// to intelligently route based on content type, complexity, and requirements
 	return r.routeCascade(ctx, profile, composite, stats)
 }
 
 // routeByRule uses rule-based matching to select backend
 func (r *CompositeRouter) routeByRule(ctx context.Context, profile *ProfileInstance, composite *model.CompositeAutoModel, stats *StatsCollector) (*RouteResult, error) {
-	// For MVP: use cascade routing
-	// TODO: Implement rule-based routing using composite.RoutingRules
+	// For MVP: use cascade routing as fallback
+	// Future: Implement rule-based routing using composite.RoutingRules
+	// to allow custom routing logic based on user-defined conditions
 	return r.routeCascade(ctx, profile, composite, stats)
 }
