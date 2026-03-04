@@ -53,6 +53,5 @@ web/coverage/
 **/TEST_REPORT.md
 **/TEST_REPORT*.md
 
-# Documentation and OMC state
-docs/
-**/.omc/
+**/.bak
+**/.tmp
