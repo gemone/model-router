@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)
+![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)
 ![Vue](https://img.shields.io/badge/Vue-3.5+-4FC08D?logo=vue.js)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -52,7 +52,7 @@
 ## 技术栈
 
 ### 后端
-- **Go 1.23+** - 高性能并发处理
+- **Go 1.26+** - 高性能并发处理
 - **Fiber v2** - 快速 HTTP 框架
 - **GORM** - ORM 数据库操作
 - **SQLite** - 轻量级数据存储
@@ -414,10 +414,37 @@ server {
    ```
 3. 在 `init()` 中注册适配器
 
+### E2E 测试
+
+项目包含完整的 E2E 测试套件，覆盖 API 端点、管理功能、路由策略和集成场景。
+
+```bash
+# 启动服务器并运行 E2E 测试
+make dev &
+sleep 3
+make test-e2e
+
+# 或使用 CI 模式（自动启动/停止服务器）
+make test-e2e-ci
+
+# 运行特定 E2E 测试套件
+make test-e2e-api       # API 端点测试
+make test-e2e-admin     # 管理功能测试
+make test-e2e-router    # 路由策略测试
+```
+
+E2E 测试覆盖以下场景：
+- **API 测试**: Chat Completions、Embeddings、Models 列表
+- **管理测试**: Profile、Provider、Model 的 CRUD 操作
+- **路由测试**: 优先级、加权、自动、延迟、健康度、成本策略
+- **降级测试**: 自动降级、级联降级、备用模型
+- **集成测试**: 流式响应、压缩功能、错误处理
+- **复合模型测试**: 并行/串行策略、聚合方法
+
 ### 运行测试
 
 ```bash
-# Go 测试
+# Go 单元测试
 make test-go
 
 # 前端测试
@@ -428,6 +455,12 @@ make test-web-ui
 
 # 覆盖率报告
 make test-web-coverage
+
+# E2E 测试（需要服务器运行）
+make test-e2e
+
+# E2E 测试（自动启动服务器）
+make test-e2e-ci
 
 # 所有测试
 make test

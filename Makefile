@@ -1,4 +1,4 @@
-.PHONY: all build build-web dev clean run test test-web test-go test-integration deps fmt lint docker-build
+.PHONY: all build build-web dev clean run test test-web test-go test-integration test-e2e deps fmt lint docker-build
 
 # 默认目标
 all: build
@@ -48,6 +48,52 @@ test-web-coverage:
 
 test-integration:
 	go test -v -tags integration ./...
+
+# E2E 测试
+test-e2e:
+	go test -v ./e2e/...
+
+test-e2e-api:
+	go test -v ./e2e/api/...
+
+test-e2e-admin:
+	go test -v ./e2e/admin/...
+
+test-e2e-router:
+	go test -v ./e2e/router/...
+
+test-e2e-integration:
+	go test -v ./e2e/integration/...
+
+test-e2e-coverage:
+	go test -v -coverprofile=e2e-coverage.out ./e2e/...
+	go tool cover -html=e2e-coverage.out -o e2e-coverage.html
+
+test-e2e-short:
+	go test -v -short ./e2e/...
+
+# E2E 测试（需要运行服务器）
+test-e2e-ci:
+	@echo "Starting server for E2E tests..."
+	@trap 'kill $$(ps aux | grep "[g]o run ./cmd/server" | awk "{print \$$2}") 2>/dev/null || true' EXIT INT TERM; \
+	go run ./cmd/server > /tmp/model-router-e2e.log 2>&1 & SERVER_PID=$$!; \
+	echo "Server PID: $$SERVER_PID"; \
+	sleep 3; \
+	for i in $$(seq 1 30); do \
+		if curl -f http://localhost:8080/health > /dev/null 2>&1; then \
+			echo "Server is ready"; \
+			break; \
+		fi; \
+		if [ $$i -eq 30 ]; then \
+			echo "Server failed to start"; \
+			cat /tmp/model-router-e2e.log; \
+			exit 1; \
+		fi; \
+		sleep 1; \
+	done; \
+	go test -v ./e2e/...; \
+	TEST_RESULT=$$?; \
+	exit $$TEST_RESULT
 
 # 基准测试
 bench:
@@ -118,13 +164,18 @@ gen-certs:
 # 帮助
 help:
 	@echo "Available targets:"
-	@echo "  make build         - Build the full application"
-	@echo "  make dev           - Run in development mode"
-	@echo "  make test          - Run all tests"
-	@echo "  make test-go       - Run Go tests"
-	@echo "  make test-web      - Run web tests"
-	@echo "  make deps          - Install dependencies"
-	@echo "  make update-deps   - Update all dependencies"
-	@echo "  make clean         - Clean build artifacts"
-	@echo "  make docker-build  - Build Docker image"
-	@echo "  make release       - Build release binaries"
+	@echo "  make build              - Build the full application"
+	@echo "  make dev                - Run in development mode"
+	@echo "  make test               - Run all tests"
+	@echo "  make test-go            - Run Go unit tests"
+	@echo "  make test-web           - Run web tests"
+	@echo "  make test-e2e           - Run E2E tests (requires server running)"
+	@echo "  make test-e2e-api       - Run E2E API tests"
+	@echo "  make test-e2e-admin     - Run E2E admin tests"
+	@echo "  make test-e2e-router    - Run E2E router tests"
+	@echo "  make test-e2e-ci        - Run E2E tests with auto server start"
+	@echo "  make deps               - Install dependencies"
+	@echo "  make update-deps        - Update all dependencies"
+	@echo "  make clean              - Clean build artifacts"
+	@echo "  make docker-build       - Build Docker image"
+	@echo "  make release            - Build release binaries"

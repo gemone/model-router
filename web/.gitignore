@@ -1,0 +1,7 @@
+playwright-report/
+test-results/
+e2e-results.json
+
+# Backup and temporary files
+*.bak
+*.tmp
