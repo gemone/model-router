@@ -36,13 +36,13 @@ func errorResponse(errorMsg, details, hint string) ErrorResponse {
 	}
 }
 
-// AdminHandler 管理后台处理器
+// AdminHandler manages the admin backend
 type AdminHandler struct {
 	profileManager *service.ProfileManager
 	stats          *service.StatsCollector
 }
 
-// NewAdminHandler 创建 Admin 处理器
+// NewAdminHandler creates a new Admin handler
 func NewAdminHandler() *AdminHandler {
 	return &AdminHandler{
 		profileManager: service.GetProfileManager(),
@@ -50,101 +50,130 @@ func NewAdminHandler() *AdminHandler {
 	}
 }
 
-// RegisterRoutes 注册管理路由
+// RegisterRoutes registers admin routes
+// Note: Authentication endpoints (login, logout, auth/status) are registered separately
+// with stricter rate limiting in serve.go
 func (h *AdminHandler) RegisterRoutes(r fiber.Router) {
-	// Profile 管理
+	// Profile management
 	r.Get("/profiles", h.ListProfiles)
 	r.Post("/profiles", h.CreateProfile)
 	r.Get("/profiles/:id", h.GetProfile)
 	r.Put("/profiles/:id", h.UpdateProfile)
 	r.Delete("/profiles/:id", h.DeleteProfile)
 
-	// Provider 管理
+	// Provider management
 	r.Get("/providers", h.ListProviders)
 	r.Post("/providers", h.CreateProvider)
 	r.Get("/providers/:id", h.GetProvider)
 	r.Put("/providers/:id", h.UpdateProvider)
 	r.Delete("/providers/:id", h.DeleteProvider)
 
-	// Model 管理
+	// Model management
 	r.Get("/models", h.ListModels)
 	r.Post("/models", h.CreateModel)
 	r.Get("/models/:id", h.GetModel)
 	r.Put("/models/:id", h.UpdateModel)
 	r.Delete("/models/:id", h.DeleteModel)
 
-	// Route 管理
+	// Route management
 	r.Get("/routes", h.ListRoutes)
 	r.Post("/routes", h.CreateRoute)
 	r.Get("/routes/:id", h.GetRoute)
 	r.Put("/routes/:id", h.UpdateRoute)
 	r.Delete("/routes/:id", h.DeleteRoute)
 
-	// 统计数据
+	// Statistics
 	r.Get("/stats/dashboard", h.GetDashboardStats)
 	r.Get("/stats/trend", h.GetTrendStats)
 	r.Get("/stats/all", h.GetAllProviderModelStats)
 	r.Get("/stats/provider/:id", h.GetProviderStats)
 	r.Get("/stats/model/:name", h.GetModelStats)
 
-	// 日志
+	// Logs
 	r.Get("/logs", h.GetLogs)
 	r.Delete("/logs", h.ClearLogs)
 
-	// 测试
+	// Testing
 	r.Post("/test", h.TestModel)
 
-	// 模型能力检测
+	// Model capability detection
 	r.Post("/models/detect-capabilities", h.DetectModelCapabilities)
 
-	// 设置管理
+	// Settings management
 	r.Get("/settings", h.GetSettings)
 	r.Put("/settings", h.UpdateSettings)
 
-	// 日志级别管理
+	// Log level management
 	r.Get("/log-level", h.GetLogLevel)
 	r.Put("/log-level", h.SetLogLevel)
 
-	// 服务器日志管理
+	// Server log management
 	r.Get("/server-logs", h.GetServerLogs)
 	r.Get("/server-logs/:request_id", h.GetServerLogDetail)
 	r.Delete("/server-logs", h.ClearServerLogs)
 }
 
-// ==================== Profile 管理 ====================
+// ==================== Profile Management ====================
 
-// ListProfiles 列出所有 Profile
+// ListProfiles lists all profiles
+// Note: API tokens are intentionally omitted from responses for security.
 func (h *AdminHandler) ListProfiles(c *fiber.Ctx) error {
 	profiles := h.profileManager.GetAllProfiles()
+	// Clear API Token and encrypted fields
+	for i := range profiles {
+		profiles[i].APIToken = ""
+		profiles[i].APITokenEnc = ""
+	}
 	return c.JSON(profiles)
 }
 
-// GetProfile 获取单个 Profile
+// GetProfile gets a single profile
 func (h *AdminHandler) GetProfile(c *fiber.Ctx) error {
 	id := c.Params("id")
-	profile := h.profileManager.GetProfileByID(id)
-	if profile == nil {
+	profileInstance := h.profileManager.GetProfileByID(id)
+	if profileInstance == nil {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
 	}
-	return c.JSON(profile.Profile)
+	// Clear API Token and encrypted fields
+	profileInstance.Profile.APIToken = ""
+	profileInstance.Profile.APITokenEnc = ""
+	return c.JSON(profileInstance.Profile)
 }
 
-// CreateProfile 创建 Profile
+// CreateProfile creates a new profile
 func (h *AdminHandler) CreateProfile(c *fiber.Ctx) error {
-	var profile model.Profile
-	if err := c.BodyParser(&profile); err != nil {
+	var req struct {
+		model.Profile
+		APIToken string `json:"api_token"` // Receive plaintext token
+	}
+
+	if err := c.BodyParser(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	profile := req.Profile
 	profile.ID = uuid.New().String()
+
+	// If API Token is provided, encrypt it for storage
+	if req.APIToken != "" {
+		encrypted, err := utils.Encrypt(req.APIToken)
+		if err != nil {
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to encrypt API token"})
+		}
+		profile.APITokenEnc = encrypted
+	}
 
 	if err := h.profileManager.CreateProfile(&profile); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
+
+	// Clear sensitive fields when returning
+	profile.APIToken = ""
+	profile.APITokenEnc = ""
 	return c.Status(http.StatusCreated).JSON(profile)
 }
 
-// UpdateProfile 更新 Profile
+// UpdateProfile updates a profile
 func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
 	id := c.Params("id")
 
@@ -168,6 +197,7 @@ func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
 		ModelIDs            []string `json:"model_ids"`
 		FallbackModels      []string `json:"fallback_models"`
 		RouteIDs            []string `json:"route_ids"`
+		APIToken            *string  `json:"api_token"` // API Token update field
 	}
 	if err := c.BodyParser(&updates); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -205,13 +235,28 @@ func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
 		existingProfile.RouteIDs = updates.RouteIDs
 	}
 
+	// Update API Token (if provided)
+	if updates.APIToken != nil {
+		if *updates.APIToken != "" {
+			// Encrypt the new token
+			encrypted, err := utils.Encrypt(*updates.APIToken)
+			if err != nil {
+				return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to encrypt API token"})
+			}
+			existingProfile.APITokenEnc = encrypted
+		} else {
+			// Empty string means clear the token
+			existingProfile.APITokenEnc = ""
+		}
+	}
+
 	if err := h.profileManager.UpdateProfile(&existingProfile); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(existingProfile)
 }
 
-// DeleteProfile 删除 Profile
+// DeleteProfile deletes a profile
 func (h *AdminHandler) DeleteProfile(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if err := h.profileManager.DeleteProfile(id); err != nil {
@@ -220,9 +265,9 @@ func (h *AdminHandler) DeleteProfile(c *fiber.Ctx) error {
 	return c.SendStatus(http.StatusNoContent)
 }
 
-// ==================== Provider 管理 ====================
+// ==================== Provider Management ====================
 
-// ListProviders 列出 Provider
+// ListProviders lists all providers
 // Note: API keys are intentionally omitted from responses for security.
 // The APIKey field is cleared and APIKeyEnc (encrypted) is never returned.
 func (h *AdminHandler) ListProviders(c *fiber.Ctx) error {
@@ -232,7 +277,7 @@ func (h *AdminHandler) ListProviders(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 不返回加密的API密钥 (API keys are redacted for security)
+	// Don't return encrypted API keys (API keys are redacted for security)
 	for i := range providers {
 		providers[i].APIKey = ""
 		providers[i].APIKeyEnc = ""
@@ -241,7 +286,7 @@ func (h *AdminHandler) ListProviders(c *fiber.Ctx) error {
 	return c.JSON(providers)
 }
 
-// GetProvider 获取单个 Provider
+// GetProvider gets a single provider
 func (h *AdminHandler) GetProvider(c *fiber.Ctx) error {
 	id := c.Params("id")
 	db := database.GetDB()
@@ -257,7 +302,7 @@ func (h *AdminHandler) GetProvider(c *fiber.Ctx) error {
 	return c.JSON(provider)
 }
 
-// CreateProvider 创建 Provider
+// CreateProvider creates a new provider
 func (h *AdminHandler) CreateProvider(c *fiber.Ctx) error {
 	var req struct {
 		model.Provider
@@ -271,7 +316,7 @@ func (h *AdminHandler) CreateProvider(c *fiber.Ctx) error {
 	provider := req.Provider
 	provider.ID = uuid.New().String()
 
-	// 加密API密钥
+	// Encrypt API key
 	if req.APIKey != "" {
 		encrypted, err := utils.Encrypt(req.APIKey)
 		if err != nil {
@@ -285,7 +330,7 @@ func (h *AdminHandler) CreateProvider(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 刷新 Profile
+	// Refresh profiles
 	h.profileManager.RefreshAll()
 
 	provider.APIKey = ""
@@ -293,7 +338,7 @@ func (h *AdminHandler) CreateProvider(c *fiber.Ctx) error {
 	return c.Status(http.StatusCreated).JSON(provider)
 }
 
-// UpdateProvider 更新 Provider
+// UpdateProvider updates a provider
 func (h *AdminHandler) UpdateProvider(c *fiber.Ctx) error {
 	id := c.Params("id")
 
@@ -313,13 +358,13 @@ func (h *AdminHandler) UpdateProvider(c *fiber.Ctx) error {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "provider not found"})
 	}
 
-	// 更新字段
+	// Update fields
 	provider.Name = req.Name
 	provider.Type = req.Type
 	provider.BaseURL = req.BaseURL
 	provider.Enabled = req.Enabled
 
-	// 如果提供了新的API密钥，更新它
+	// If new API key is provided, update it
 	if req.APIKey != "" {
 		encrypted, err := utils.Encrypt(req.APIKey)
 		if err != nil {
@@ -332,7 +377,7 @@ func (h *AdminHandler) UpdateProvider(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 刷新 Profile
+	// Refresh profiles
 	h.profileManager.RefreshAll()
 
 	provider.APIKey = ""
@@ -340,29 +385,29 @@ func (h *AdminHandler) UpdateProvider(c *fiber.Ctx) error {
 	return c.JSON(provider)
 }
 
-// DeleteProvider 删除 Provider
+// DeleteProvider deletes a provider
 func (h *AdminHandler) DeleteProvider(c *fiber.Ctx) error {
 	id := c.Params("id")
 
 	db := database.GetDB()
 
-	// 删除关联的模型
+	// Delete associated models
 	db.Where("provider_id = ?", id).Delete(&model.Model{})
 
-	// 删除 Provider
+	// Delete provider
 	if err := db.Delete(&model.Provider{}, "id = ?", id).Error; err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 刷新 Profile
+	// Refresh profiles
 	h.profileManager.RefreshAll()
 
 	return c.SendStatus(http.StatusNoContent)
 }
 
-// ==================== Model 管理 ====================
+// ==================== Model Management ====================
 
-// ListModels 列出 Model
+// ListModels lists all models
 func (h *AdminHandler) ListModels(c *fiber.Ctx) error {
 	db := database.GetDB()
 	var models []model.Model
@@ -382,7 +427,7 @@ func (h *AdminHandler) ListModels(c *fiber.Ctx) error {
 	return c.JSON(models)
 }
 
-// GetModel 获取单个 Model
+// GetModel gets a single model
 func (h *AdminHandler) GetModel(c *fiber.Ctx) error {
 	id := c.Params("id")
 	db := database.GetDB()
@@ -395,7 +440,7 @@ func (h *AdminHandler) GetModel(c *fiber.Ctx) error {
 	return c.JSON(m)
 }
 
-// CreateModel 创建 Model
+// CreateModel creates a new model
 func (h *AdminHandler) CreateModel(c *fiber.Ctx) error {
 	var m model.Model
 	if err := c.BodyParser(&m); err != nil {
@@ -409,13 +454,13 @@ func (h *AdminHandler) CreateModel(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 刷新 Profile
+	// Refresh profiles
 	h.profileManager.RefreshAll()
 
 	return c.Status(http.StatusCreated).JSON(m)
 }
 
-// UpdateModel 更新 Model
+// UpdateModel updates a model
 func (h *AdminHandler) UpdateModel(c *fiber.Ctx) error {
 	id := c.Params("id")
 
@@ -436,13 +481,13 @@ func (h *AdminHandler) UpdateModel(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 刷新 Profile
+	// Refresh profiles
 	h.profileManager.RefreshAll()
 
 	return c.JSON(m)
 }
 
-// DeleteModel 删除 Model
+// DeleteModel deletes a model
 func (h *AdminHandler) DeleteModel(c *fiber.Ctx) error {
 	id := c.Params("id")
 
@@ -451,15 +496,15 @@ func (h *AdminHandler) DeleteModel(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 刷新 Profile
+	// Refresh profiles
 	h.profileManager.RefreshAll()
 
 	return c.SendStatus(http.StatusNoContent)
 }
 
-// ==================== Route 管理 ====================
+// ==================== Route Management ====================
 
-// ListRoutes 列出所有 Route
+// ListRoutes lists all routes
 func (h *AdminHandler) ListRoutes(c *fiber.Ctx) error {
 	db := database.GetDB()
 	var routes []model.Route
@@ -533,7 +578,7 @@ func (h *AdminHandler) ListRoutes(c *fiber.Ctx) error {
 	return c.JSON(result)
 }
 
-// GetRoute 获取单个 Route
+// GetRoute gets a single route
 func (h *AdminHandler) GetRoute(c *fiber.Ctx) error {
 	id := c.Params("id")
 	db := database.GetDB()
@@ -606,7 +651,7 @@ func (h *AdminHandler) GetRoute(c *fiber.Ctx) error {
 	})
 }
 
-// CreateRouteRequest 前端创建路由请求格式
+// CreateRouteRequest frontend route creation request format
 type CreateRouteRequest struct {
 	Name            string   `json:"name"`
 	Description     string   `json:"description"`
@@ -619,7 +664,7 @@ type CreateRouteRequest struct {
 	Enabled         bool     `json:"enabled"`
 }
 
-// CreateRoute 创建 Route
+// CreateRoute creates a route
 func (h *AdminHandler) CreateRoute(c *fiber.Ctx) error {
 	var req CreateRouteRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -727,7 +772,7 @@ func (h *AdminHandler) CreateRoute(c *fiber.Ctx) error {
 	})
 }
 
-// UpdateRouteRequest 前端更新路由请求格式
+// UpdateRouteRequest frontend route update request format
 type UpdateRouteRequest struct {
 	Name            *string  `json:"name"`
 	Description     *string  `json:"description"`
@@ -738,7 +783,7 @@ type UpdateRouteRequest struct {
 	FallbackEnabled *bool    `json:"fallback_enabled"`
 }
 
-// UpdateRoute 更新 Route
+// UpdateRoute updates a route
 func (h *AdminHandler) UpdateRoute(c *fiber.Ctx) error {
 	id := c.Params("id")
 
@@ -872,7 +917,7 @@ func (h *AdminHandler) UpdateRoute(c *fiber.Ctx) error {
 	})
 }
 
-// DeleteRoute 删除 Route
+// DeleteRoute deletes a route
 func (h *AdminHandler) DeleteRoute(c *fiber.Ctx) error {
 	id := c.Params("id")
 
@@ -887,7 +932,7 @@ func (h *AdminHandler) DeleteRoute(c *fiber.Ctx) error {
 	return c.SendStatus(http.StatusNoContent)
 }
 
-// DetectModelCapabilities 检测模型能力
+// DetectModelCapabilities detects model capabilities
 func (h *AdminHandler) DetectModelCapabilities(c *fiber.Ctx) error {
 	var req struct {
 		ProviderID string `json:"provider_id"`
@@ -898,14 +943,14 @@ func (h *AdminHandler) DetectModelCapabilities(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// 获取 Provider 类型以确定能力检测策略
+	// Get Provider type to determine capability detection strategy
 	db := database.GetDB()
 	var provider model.Provider
 	if err := db.First(&provider, "id = ?", req.ProviderID).Error; err != nil {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "provider not found"})
 	}
 
-	// 基于模型名称和 Provider 类型检测能力
+	// Detect capabilities based on model name and Provider type
 	supportsFunc := detectFunctionCapability(string(provider.Type), req.ModelName)
 	supportsVision := detectVisionCapability(string(provider.Type), req.ModelName)
 
@@ -916,27 +961,27 @@ func (h *AdminHandler) DetectModelCapabilities(c *fiber.Ctx) error {
 	})
 }
 
-// detectFunctionCapability 检测模型是否支持函数调用
+// detectFunctionCapability detects if a model supports function calling
 func detectFunctionCapability(providerType, modelName string) bool {
-	// OpenAI 模型
+	// OpenAI models
 	if providerType == "openai" || providerType == "azure" || providerType == "openai-compatible" {
-		// GPT-4 系列支持函数调用
+		// GPT-4 series supports function calling
 		if contains(modelName, "gpt-4") || contains(modelName, "gpt-3.5-turbo") || contains(modelName, "gpt-4o") {
 			return true
 		}
 	}
 
-	// Anthropic 模型
+	// Anthropic models
 	if providerType == "anthropic" {
-		// Claude 3 系列支持函数调用
+		// Claude 3 series supports function calling
 		if contains(modelName, "claude-3") {
 			return true
 		}
 	}
 
-	// DeepSeek 模型
+	// DeepSeek models
 	if providerType == "deepseek" {
-		// deepseek-chat 和 deepseek-coder 支持
+		// deepseek-chat and deepseek-coder support function calling
 		if contains(modelName, "deepseek-chat") || contains(modelName, "deepseek-coder") {
 			return true
 		}
@@ -945,30 +990,30 @@ func detectFunctionCapability(providerType, modelName string) bool {
 	return false
 }
 
-// detectVisionCapability 检测模型是否支持视觉
+// detectVisionCapability detects if a model supports vision
 func detectVisionCapability(providerType, modelName string) bool {
-	// OpenAI 模型 - 带 vision 或 v 的版本
+	// OpenAI models - versions with vision or v
 	if providerType == "openai" || providerType == "azure" || providerType == "openai-compatible" {
 		if contains(modelName, "vision") || contains(modelName, "-4o") || contains(modelName, "-4-turbo") {
 			return true
 		}
 	}
 
-	// Anthropic 模型 - Claude 3 系列都支持视觉
+	// Anthropic models - Claude 3 series all support vision
 	if providerType == "anthropic" {
 		if contains(modelName, "claude-3") {
 			return true
 		}
 	}
 
-	// DeepSeek - VL 模型支持
+	// DeepSeek - VL models support vision
 	if providerType == "deepseek" {
 		if contains(modelName, "vl") || contains(modelName, "vision") {
 			return true
 		}
 	}
 
-	// Ollama - 多模态模型
+	// Ollama - multimodal models
 	if providerType == "ollama" {
 		if contains(modelName, "llava") || contains(modelName, "vision") || contains(modelName, "mm") {
 			return true
@@ -978,18 +1023,18 @@ func detectVisionCapability(providerType, modelName string) bool {
 	return false
 }
 
-// contains 检查字符串是否包含子串（不区分大小写）
+// contains checks if a string contains a substring (case-insensitive)
 func contains(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
-// ==================== 统计数据 ====================
+// ==================== Statistics ====================
 
-// GetDashboardStats 获取仪表盘统计
+// GetDashboardStats gets dashboard statistics
 func (h *AdminHandler) GetDashboardStats(c *fiber.Ctx) error {
 	stats := h.stats.GetDashboardStats()
 
-	// 添加活跃模型和供应商数量
+	// Add active model and provider counts
 	db := database.GetDB()
 	var modelCount, providerCount int64
 	db.Model(&model.Model{}).Where("enabled = ?", true).Count(&modelCount)
@@ -1001,35 +1046,35 @@ func (h *AdminHandler) GetDashboardStats(c *fiber.Ctx) error {
 	return c.JSON(stats)
 }
 
-// GetTrendStats 获取趋势统计（最近24小时）
+// GetTrendStats gets trend statistics (last 24 hours)
 func (h *AdminHandler) GetTrendStats(c *fiber.Ctx) error {
 	stats := h.stats.GetTrendStats()
 	return c.JSON(stats)
 }
 
-// GetProviderStats 获取 Provider 统计
+// GetProviderStats gets provider statistics
 func (h *AdminHandler) GetProviderStats(c *fiber.Ctx) error {
 	id := c.Params("id")
 	stats := h.stats.GetProviderStats(id)
 	return c.JSON(stats)
 }
 
-// GetModelStats 获取 Model 统计
+// GetModelStats gets model statistics
 func (h *AdminHandler) GetModelStats(c *fiber.Ctx) error {
 	name := c.Params("name")
 	stats := h.stats.GetModelStats(name)
 	return c.JSON(stats)
 }
 
-// GetAllProviderModelStats 获取所有供应商和模型的详细统计
+// GetAllProviderModelStats gets detailed statistics for all providers and models
 func (h *AdminHandler) GetAllProviderModelStats(c *fiber.Ctx) error {
 	stats := h.stats.GetAllProviderModelStats()
 	return c.JSON(stats)
 }
 
-// ==================== 日志 ====================
+// ==================== Logs ====================
 
-// GetLogs 获取日志
+// GetLogs gets logs
 func (h *AdminHandler) GetLogs(c *fiber.Ctx) error {
 	page := 1
 	pageSize := 50
@@ -1052,7 +1097,7 @@ func (h *AdminHandler) GetLogs(c *fiber.Ctx) error {
 	})
 }
 
-// ClearLogs 清空日志
+// ClearLogs clears logs
 func (h *AdminHandler) ClearLogs(c *fiber.Ctx) error {
 	if err := h.stats.ClearLogs(); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -1060,34 +1105,34 @@ func (h *AdminHandler) ClearLogs(c *fiber.Ctx) error {
 	return c.Status(http.StatusNoContent).SendString("")
 }
 
-// ==================== 测试 ====================
+// ==================== Testing ====================
 
-// TestModel 测试模型
+// TestModel tests a model
 func (h *AdminHandler) TestModel(c *fiber.Ctx) error {
 	var req struct {
-		ProviderID string `json:"provider_id"`
-		Model      string `json:"model"`
+		Model string `json:"model"`
 	}
 	if err := c.BodyParser(&req); err != nil {
+		middleware.ErrorLog("TestModel BodyParser failed: %v", err)
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	profile := h.profileManager.GetDefaultProfile()
-	if profile == nil {
-		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": "no profile available"})
+	if req.Model == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "model is required"})
 	}
 
-	result, err := profile.TestModel(c.Context(), req.ProviderID, req.Model)
+	result, err := h.profileManager.TestModel(c.Context(), req.Model)
 	if err != nil {
+		middleware.ErrorLog("TestModel failed: model=%s error=%v", req.Model, err)
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 
 	return c.JSON(result)
 }
 
-// ==================== 设置管理 ====================
+// ==================== Settings Management ====================
 
-// SettingsRequest 设置请求结构
+// SettingsRequest settings request structure
 // SECURITY NOTE: AdminToken and JWTSecret are sensitive fields that must never be
 // included in any JSON response. This struct is ONLY used for parsing input.
 // All responses use fiber.Map with explicit empty strings for sensitive fields.
@@ -1105,28 +1150,28 @@ type SettingsRequest struct {
 	DBPath         string `json:"db_path"`
 }
 
-// GetSettings 获取系统设置
+// GetSettings gets system settings
 func (h *AdminHandler) GetSettings(c *fiber.Ctx) error {
 	cfg := config.Get()
 
 	settings := fiber.Map{
-		"port":            cfg.Port,
-		"host":            cfg.Host,
+		"port":            cfg.Server.Port,
+		"host":            cfg.Server.Host,
 		"language":        "zh-CN",
-		"enable_cors":     cfg.EnableCORS,
-		"enable_stats":    cfg.EnableStats,
-		"enable_fallback": cfg.EnableFallback,
+		"enable_cors":     cfg.CORS.Enabled,
+		"enable_stats":    cfg.Features.EnableStats,
+		"enable_fallback": cfg.Features.EnableFallback,
 		"admin_token":     "",
 		"jwt_secret":      "",
-		"log_level":       cfg.LogLevel,
-		"max_retries":     cfg.MaxRetries,
-		"db_path":         cfg.DBPath,
+		"log_level":       cfg.Logging.Level,
+		"max_retries":     cfg.Features.MaxRetries,
+		"db_path":         cfg.Database.Path,
 	}
 
 	return c.JSON(settings)
 }
 
-// UpdateSettings 更新系统设置
+// UpdateSettings updates system settings
 func (h *AdminHandler) UpdateSettings(c *fiber.Ctx) error {
 	var req SettingsRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -1136,51 +1181,51 @@ func (h *AdminHandler) UpdateSettings(c *fiber.Ctx) error {
 	cfg := config.Get()
 
 	if req.Port > 0 && req.Port <= 65535 {
-		cfg.Port = req.Port
+		cfg.Server.Port = req.Port
 	}
 	if req.Host != "" {
-		cfg.Host = req.Host
+		cfg.Server.Host = req.Host
 	}
 	if req.AdminToken != "" {
-		cfg.AdminToken = req.AdminToken
+		cfg.Security.AdminToken = req.AdminToken
 	}
 	if req.JWTSecret != "" {
-		cfg.JWTSecret = req.JWTSecret
+		cfg.Security.JWTSecret = req.JWTSecret
 	}
-	cfg.EnableCORS = req.EnableCORS
-	cfg.EnableStats = req.EnableStats
-	cfg.EnableFallback = req.EnableFallback
+	cfg.CORS.Enabled = req.EnableCORS
+	cfg.Features.EnableStats = req.EnableStats
+	cfg.Features.EnableFallback = req.EnableFallback
 	if req.LogLevel != "" {
-		cfg.LogLevel = req.LogLevel
+		cfg.Logging.Level = req.LogLevel
 	}
 	if req.MaxRetries >= 0 {
-		cfg.MaxRetries = req.MaxRetries
+		cfg.Features.MaxRetries = req.MaxRetries
 	}
 	if req.DBPath != "" {
-		cfg.DBPath = req.DBPath
+		cfg.Database.Path = req.DBPath
 	}
 
 	response := fiber.Map{
-		"port":            cfg.Port,
-		"host":            cfg.Host,
+		"port":            cfg.Server.Port,
+		"host":            cfg.Server.Host,
 		"language":        req.Language,
-		"enable_cors":     cfg.EnableCORS,
-		"enable_stats":    cfg.EnableStats,
-		"enable_fallback": cfg.EnableFallback,
+		"enable_cors":     cfg.CORS.Enabled,
+		"enable_stats":    cfg.Features.EnableStats,
+		"enable_fallback": cfg.Features.EnableFallback,
 		"admin_token":     "",
 		"jwt_secret":      "",
-		"log_level":       cfg.LogLevel,
-		"max_retries":     cfg.MaxRetries,
-		"db_path":         cfg.DBPath,
+		"log_level":       cfg.Logging.Level,
+		"max_retries":     cfg.Features.MaxRetries,
+		"db_path":         cfg.Database.Path,
 		"message":         "Settings updated. Some changes may require server restart.",
 	}
 
 	return c.JSON(response)
 }
 
-// ==================== 日志级别管理 ====================
+// ==================== Log Level Management ====================
 
-// GetLogLevel 获取当前日志级别
+// GetLogLevel gets current log level
 func (h *AdminHandler) GetLogLevel(c *fiber.Ctx) error {
 	level := middleware.GetLogLevelString()
 	return c.JSON(fiber.Map{
@@ -1190,12 +1235,12 @@ func (h *AdminHandler) GetLogLevel(c *fiber.Ctx) error {
 	})
 }
 
-// SetLogLevelRequest 设置日志级别请求
+// SetLogLevelRequest set log level request
 type SetLogLevelRequest struct {
 	Level string `json:"level"`
 }
 
-// SetLogLevel 设置日志级别
+// SetLogLevel sets log level
 func (h *AdminHandler) SetLogLevel(c *fiber.Ctx) error {
 	var req SetLogLevelRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -1205,7 +1250,7 @@ func (h *AdminHandler) SetLogLevel(c *fiber.Ctx) error {
 		})
 	}
 
-	// 验证日志级别
+	// Validate log level
 	level := strings.ToLower(req.Level)
 	validLevels := map[string]bool{
 		"debug": true,
@@ -1222,7 +1267,7 @@ func (h *AdminHandler) SetLogLevel(c *fiber.Ctx) error {
 		})
 	}
 
-	// 设置日志级别
+	// Set log level
 	middleware.SetLogLevel(level)
 
 	return c.JSON(fiber.Map{
@@ -1232,7 +1277,7 @@ func (h *AdminHandler) SetLogLevel(c *fiber.Ctx) error {
 	})
 }
 
-// getLogLevelDescription 获取日志级别描述
+// getLogLevelDescription gets log level description
 func getLogLevelDescription(level string) string {
 	switch level {
 	case "debug":
@@ -1248,9 +1293,9 @@ func getLogLevelDescription(level string) string {
 	}
 }
 
-// GetServerLogs 获取服务器实时日志（支持分页和搜索）
+// GetServerLogs gets server real-time logs (supports pagination and search)
 func (h *AdminHandler) GetServerLogs(c *fiber.Ctx) error {
-	// 解析查询参数
+	// Parse query parameters
 	level := c.Query("level", "")
 	keyword := c.Query("keyword", "")
 	requestID := c.Query("request_id", "")
@@ -1270,7 +1315,7 @@ func (h *AdminHandler) GetServerLogs(c *fiber.Ctx) error {
 		}
 	}
 
-	// 如果按 request_id 查询特定请求的日志
+	// If querying specific request logs by request_id
 	if requestID != "" && !groupByRequest {
 		entries := middleware.GetLogStore().GetRequestLogs(requestID)
 		return c.JSON(fiber.Map{
@@ -1280,7 +1325,7 @@ func (h *AdminHandler) GetServerLogs(c *fiber.Ctx) error {
 		})
 	}
 
-	// 如果按请求分组
+	// If grouping by request
 	if groupByRequest {
 		groups := middleware.GetRequestGroups(keyword, pageSize)
 		return c.JSON(fiber.Map{
@@ -1290,7 +1335,7 @@ func (h *AdminHandler) GetServerLogs(c *fiber.Ctx) error {
 		})
 	}
 
-	// 普通查询
+	// Normal query
 	result := middleware.QueryLogs(level, keyword, "", page, pageSize)
 	return c.JSON(fiber.Map{
 		"entries":   result.Entries,
@@ -1301,7 +1346,7 @@ func (h *AdminHandler) GetServerLogs(c *fiber.Ctx) error {
 	})
 }
 
-// GetServerLogDetail 获取特定请求的日志详情
+// GetServerLogDetail gets log details for a specific request
 func (h *AdminHandler) GetServerLogDetail(c *fiber.Ctx) error {
 	requestID := c.Params("request_id")
 	if requestID == "" {
@@ -1324,11 +1369,88 @@ func (h *AdminHandler) GetServerLogDetail(c *fiber.Ctx) error {
 	})
 }
 
-// ClearServerLogs 清空服务器日志缓冲区
+// ClearServerLogs clears server log buffer
 func (h *AdminHandler) ClearServerLogs(c *fiber.Ctx) error {
 	middleware.GetLogStore().Clear()
 	middleware.ClearBuffer()
 	return c.JSON(fiber.Map{
 		"message": "Server logs cleared successfully",
+	})
+}
+
+// ==================== Authentication Management ====================
+
+// LoginRequest login request
+type LoginRequest struct {
+	Password string `json:"password"`
+}
+
+// LoginResponse login response
+type LoginResponse struct {
+	Success bool   `json:"success"`
+	Token   string `json:"token,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// Login handles login request
+func (h *AdminHandler) Login(c *fiber.Ctx) error {
+	var req LoginRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "invalid request body",
+			"message": err.Error(),
+		})
+	}
+
+	if req.Password == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "password_required",
+			"message": "Password is required",
+		})
+	}
+
+	// Validate password
+	if middleware.ValidateAdminToken(req.Password) {
+		// Login successful - return success without returning the token
+		// The frontend already has the password/token from the user input
+		return c.JSON(LoginResponse{
+			Success: true,
+			Message: "Login successful",
+		})
+	}
+
+	// Login failed
+	middleware.WarnLog("Failed login attempt from %s", c.IP())
+	return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+		"success": false,
+		"error":   "invalid_credentials",
+		"message": "Invalid password",
+	})
+}
+
+// Logout handles logout request
+func (h *AdminHandler) Logout(c *fiber.Ctx) error {
+	// Since we use stateless token authentication, logout is mainly handled on the frontend
+	// Backend just returns a success response
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Logout successful",
+	})
+}
+
+// GetAuthStatus gets authentication status
+func (h *AdminHandler) GetAuthStatus(c *fiber.Ctx) error {
+	cfg := config.GetConfig()
+
+	return c.JSON(fiber.Map{
+		"enabled": cfg.Security.AdminToken != "",
+		"message": func() string {
+			if cfg.Security.AdminToken == "" {
+				return "Admin authentication is not configured"
+			}
+			return "Admin authentication is enabled"
+		}(),
 	})
 }

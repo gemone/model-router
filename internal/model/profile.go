@@ -12,7 +12,12 @@ type Profile struct {
 	Path        string      `json:"path" gorm:"uniqueIndex"` // URI 路径，如 "default", "claudecode"
 	Description string      `json:"description"`
 	Enabled     bool        `json:"enabled" gorm:"default:true"`
-	Settings    string      `json:"settings" gorm:"type:text"`         // JSON 格式的额外设置
+	Settings    string      `json:"settings" gorm:"type:text"` // JSON 格式的额外设置
+
+	// 认证配置
+	APIToken string `json:"api_token,omitempty" gorm:"size:255"` // Profile 专属的 API Token（可选）
+	// APITokenEnc 是加密存储的 API Token，不在 API 响应中返回
+	APITokenEnc string `json:"api_token_enc,omitempty" gorm:"size:512"`
 
 	// 模型关联 - 直接绑定模型（不经过路由，直接访问）
 	ModelIDs []string `json:"model_ids" gorm:"serializer:json"` // 关联的模型ID列表
@@ -31,15 +36,15 @@ type Profile struct {
 	MaxContextWindow      int    `json:"max_context_window"`     // 最大上下文
 
 	// 多模型组合配置
-	EnableMultiModel     bool   `json:"enable_multi_model"`    // 启用多模型
-	MultiModelConfig     string `json:"multi_model_config"`   // JSON 配置
+	EnableMultiModel bool   `json:"enable_multi_model"`  // 启用多模型
+	MultiModelConfig string `json:"multi_model_config"` // JSON 配置
 
 	// Compression model group configuration
-	DefaultCompressionGroup string                   `json:"default_compression_group,omitempty" gorm:"size:255"`
-	CompressionGroups        []CompressionModelGroup  `json:"compression_groups,omitempty" gorm:"foreignKey:ProfileID;constraint:OnDelete:CASCADE"`
+	DefaultCompressionGroup string                  `json:"default_compression_group,omitempty" gorm:"size:255"`
+	CompressionGroups        []CompressionModelGroup `json:"compression_groups,omitempty" gorm:"foreignKey:ProfileID;constraint:OnDelete:CASCADE"`
 
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // CompressionLevel 常量

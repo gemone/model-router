@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -33,29 +34,35 @@ type Counter struct {
 var (
 	defaultCounter *Counter
 	initErr        error
+	once           sync.Once
 )
 
 func init() {
-	// Initialize tokenizer during package init to fail fast on startup
-	// This prevents runtime panics and allows for proper error handling
-	defaultCounter = &Counter{}
-	tkt, err := tiktoken.GetEncoding(defaultEncoding)
-	if err != nil {
-		log.Printf("[WARNING] Failed to initialize tiktoken encoding %q: %v", defaultEncoding, err)
-		log.Printf("[WARNING] Using fallback token estimation (4 chars/token)")
-		defaultCounter.useFallback = true
-		initErr = fmt.Errorf("tiktoken initialization failed, using fallback: %w", err)
-		return
-	}
-	defaultCounter.tiktoken = tkt
-	defaultCounter.useFallback = false
-	log.Printf("[INFO] Tiktoken encoding %q initialized successfully", defaultEncoding)
+	// Lazy initialization - will be initialized on first use
+	defaultCounter = &Counter{useFallback: true} // Start with fallback
+}
+
+// initialize performs the actual initialization (lazy loading)
+func initialize() {
+	once.Do(func() {
+		tkt, err := tiktoken.GetEncoding(defaultEncoding)
+		if err != nil {
+			log.Printf("[WARNING] Failed to initialize tiktoken encoding %q: %v", defaultEncoding, err)
+			log.Printf("[WARNING] Using fallback token estimation (4 chars/token)")
+			initErr = fmt.Errorf("tiktoken initialization failed, using fallback: %w", err)
+			return
+		}
+		defaultCounter.tiktoken = tkt
+		defaultCounter.useFallback = false
+		log.Printf("[INFO] Tiktoken encoding %q initialized successfully", defaultEncoding)
+	})
 }
 
 // GetDefaultCounter returns the default singleton counter instance
 // Returns a counter that either uses real tiktoken or fallback estimation
-// The initialization happens in init() to fail fast on startup
+// The initialization happens on first call (lazy loading)
 func GetDefaultCounter() *Counter {
+	initialize()
 	return defaultCounter
 }
 

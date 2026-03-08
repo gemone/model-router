@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	compressionpkg "github.com/gemone/model-router/internal/compression"
 	"github.com/gemone/model-router/internal/config"
 	"github.com/gemone/model-router/internal/database"
+	"github.com/gemone/model-router/internal/middleware"
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/repository"
 	compressionservice "github.com/gemone/model-router/internal/service/compression"
@@ -534,6 +536,75 @@ func (pm *ProfileManager) DeleteProfile(path string) error {
 	return nil
 }
 
+// TestModel 通过模型名称测试模型（自动查找 provider）
+func (pm *ProfileManager) TestModel(ctx context.Context, modelName string) (*model.TestResult, error) {
+	// 1. 从数据库查询该模型及其 provider
+	db := database.GetDB()
+	var targetModel model.Model
+	result := db.Where("name = ? AND enabled = ?", modelName, true).First(&targetModel)
+	if result.Error != nil {
+		return nil, fmt.Errorf("model not found: %s", modelName)
+	}
+
+	// 2. 查询 provider
+	var provider model.Provider
+	result = db.Where("id = ? AND enabled = ?", targetModel.ProviderID, true).First(&provider)
+	if result.Error != nil {
+		return nil, fmt.Errorf("provider not found for model: %s", modelName)
+	}
+
+	// 3. 创建适配器
+	adp := adapter.Create(provider.Type)
+	if adp == nil {
+		return nil, fmt.Errorf("unsupported provider type: %s", provider.Type)
+	}
+	if err := adp.Init(&provider); err != nil {
+		return nil, fmt.Errorf("failed to init adapter: %v", err)
+	}
+
+	// 4. 构建请求
+	actualModelName := targetModel.OriginalName
+	if actualModelName == "" {
+		actualModelName = modelName
+	}
+
+	req := &model.ChatCompletionRequest{
+		Model: actualModelName,
+		Messages: []model.Message{
+			{Role: "user", Content: "Hello, this is a test message. Please respond with 'OK'."},
+		},
+		MaxTokens: 50,
+	}
+
+	// 5. 打印请求体
+	endpoint := provider.BaseURL + provider.ChatPath
+	reqJSON, _ := json.MarshalIndent(req, "", "  ")
+	middleware.InfoLog("[TestModel] Request to provider: endpoint=%s model=%s\nBody: %s", endpoint, actualModelName, string(reqJSON))
+
+	// 6. 发送请求
+	start := time.Now()
+	_, err := adp.ChatCompletion(ctx, req)
+	latency := time.Since(start).Milliseconds()
+
+	testResult := &model.TestResult{
+		ProviderID: provider.ID,
+		Model:      modelName,
+		Latency:    latency,
+		CreatedAt:  time.Now(),
+	}
+
+	if err != nil {
+		testResult.Success = false
+		testResult.Error = err.Error()
+	} else {
+		testResult.Success = true
+	}
+
+	db.Create(testResult)
+
+	return testResult, nil
+}
+
 // Refresh 刷新指定 Profile
 func (pm *ProfileManager) Refresh(path string) error {
 	pm.Lock()
@@ -713,7 +784,7 @@ func (pi *ProfileInstance) tryFallback(modelName string) *RouteResult {
 // shouldFallback 判断是否应当 fallback
 func (pi *ProfileInstance) shouldFallback(providerID, modelName string) bool {
 	cfg := config.Get()
-	if !cfg.EnableFallback {
+	if !cfg.GetEnableFallback() {
 		return false
 	}
 
@@ -809,24 +880,18 @@ func (pi *ProfileInstance) TestModel(ctx context.Context, providerID, modelName 
 		return nil, fmt.Errorf("provider not found: %s", providerID)
 	}
 
-	pi.RLock()
-	var targetModel *model.Model
-	for _, m := range pi.modelMap[modelName] {
-		if m.ProviderID == providerID {
-			targetModel = m
-			break
-		}
-	}
-	pi.RUnlock()
-
-	if targetModel == nil {
+	// 直接从数据库查询该 provider 下的模型
+	db := database.GetDB()
+	var targetModel model.Model
+	result := db.Where("name = ? AND provider_id = ? AND enabled = ?", modelName, providerID, true).First(&targetModel)
+	if result.Error != nil {
 		return nil, fmt.Errorf("model not found: %s", modelName)
 	}
 
 	// Use OriginalName for the actual API call, fallback to modelName if empty
-	actualModelName := targetModel.OriginalName
-	if actualModelName == "" {
-		actualModelName = modelName
+	actualModelName := modelName
+	if targetModel.OriginalName != "" {
+		actualModelName = targetModel.OriginalName
 	}
 
 	req := &model.ChatCompletionRequest{
@@ -836,6 +901,11 @@ func (pi *ProfileInstance) TestModel(ctx context.Context, providerID, modelName 
 		},
 		MaxTokens: 50,
 	}
+
+	// 打印发送到 provider 的请求体
+	endpoint := provider.BaseURL + provider.ChatPath
+	reqJSON, _ := json.MarshalIndent(req, "", "  ")
+	middleware.InfoLog("[TestModel] Request to provider: endpoint=%s model=%s\nBody: %s", endpoint, actualModelName, string(reqJSON))
 
 	start := time.Now()
 	_, err := adp.ChatCompletion(ctx, req)
@@ -855,7 +925,6 @@ func (pi *ProfileInstance) TestModel(ctx context.Context, providerID, modelName 
 		testResult.Success = true
 	}
 
-	db := database.GetDB()
 	db.Create(testResult)
 
 	return testResult, nil

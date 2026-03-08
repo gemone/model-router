@@ -39,7 +39,7 @@ func NewAPIHandler() *APIHandler {
 	return &APIHandler{
 		profileManager: service.GetProfileManager(),
 		stats:          service.GetStatsCollector(),
-		debug:          cfg.LogLevel == "debug",
+		debug:          cfg.GetLogLevel() == "debug",
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
 	}
@@ -129,6 +129,8 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 	// 先路由，获取目标模型
 	routeResult, err := profile.Route(c.Context(), req.Model)
 	if err != nil {
+		middleware.ErrorLog("Route failed: requestID=%s model=%s profile=%s error=%v",
+			requestID, req.Model, profilePath, err)
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -200,6 +202,8 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 
 		stream, chErr := routeResult.Adapter.ChatCompletionStream(c.Context(), &req)
 		if chErr != nil {
+			middleware.ErrorLog("ChatCompletionStream failed: requestID=%s model=%s profile=%s error=%v",
+				requestID, req.Model, profilePath, chErr)
 			go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, chErr.Error(), nil)
 			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": chErr.Error()})
 		}
@@ -217,6 +221,8 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 
 	result, streamErr = routeResult.Adapter.ChatCompletion(c.Context(), &req)
 	if streamErr != nil {
+		middleware.ErrorLog("ChatCompletion failed: requestID=%s model=%s profile=%s error=%v",
+			requestID, req.Model, profilePath, streamErr)
 		go h.recordRequestLog(requestID, routeResult, req.Model, time.Since(start), false, streamErr.Error(), nil)
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": streamErr.Error()})
 	}
@@ -258,6 +264,8 @@ func (h *APIHandler) processEmbeddings(c *fiber.Ctx, profilePath string) error {
 
 	routeResult, err := profile.Route(c.Context(), req.Model)
 	if err != nil {
+		middleware.ErrorLog("Embeddings Route failed: model=%s profile=%s error=%v",
+			req.Model, profilePath, err)
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -268,6 +276,8 @@ func (h *APIHandler) processEmbeddings(c *fiber.Ctx, profilePath string) error {
 
 	result, err := routeResult.Adapter.Embeddings(c.Context(), &req)
 	if err != nil {
+		middleware.ErrorLog("Embeddings API call failed: model=%s profile=%s error=%v",
+			req.Model, profilePath, err)
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -461,7 +471,7 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 
 // recordRequestLog 记录请求日志
 func (h *APIHandler) recordRequestLog(requestID string, routeResult *service.RouteResult, modelName string, latency time.Duration, success bool, errMsg string, usage *model.Usage) {
-	if !config.Get().EnableStats {
+	if !config.Get().GetEnableStats() {
 		return
 	}
 

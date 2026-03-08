@@ -36,7 +36,7 @@ func GetProxy() *Proxy {
 	proxyOnce.Do(func() {
 		cfg := config.Get()
 		proxyInstance = &Proxy{
-			debug: cfg.LogLevel == "debug",
+			debug: cfg.GetLogLevel() == "debug",
 			httpClient: &http.Client{
 				Timeout: 30 * time.Second, // Default timeout as fallback, context can override
 				Transport: &http.Transport{
@@ -106,7 +106,7 @@ func (p *Proxy) ProxyRequest(ctx context.Context, w http.ResponseWriter, r *http
 	}
 
 	// 记录指标（异步）
-	if config.Get().EnableStats {
+	if config.Get().GetEnableStats() {
 		go p.recordMetrics(r.URL.Path, bodySize, written, resp.StatusCode, time.Since(start))
 	}
 
@@ -189,7 +189,7 @@ func (p *Proxy) ProxyStream(ctx context.Context, w http.ResponseWriter, r *http.
 	}
 
 	// 记录指标
-	if config.Get().EnableStats {
+	if config.Get().GetEnableStats() {
 		go p.recordMetrics(r.URL.Path, r.ContentLength, totalBytes, resp.StatusCode, time.Since(start))
 	}
 
@@ -278,7 +278,7 @@ func (p *Proxy) ProxyWithTransform(
 	w.Write(respBody)
 
 	// 记录指标
-	if config.Get().EnableStats {
+	if config.Get().GetEnableStats() {
 		go p.recordMetrics(r.URL.Path, int64(len(body)), int64(len(respBody)), resp.StatusCode, time.Since(start))
 	}
 

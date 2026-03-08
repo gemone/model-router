@@ -43,12 +43,12 @@ var logLevelMap = map[string]LogLevel{
 // InitLogLevel 初始化日志级别和缓冲区大小
 func InitLogLevel() {
 	cfg := config.Get()
-	SetLogLevel(cfg.LogLevel)
+	SetLogLevel(cfg.GetLogLevel())
 
 	// Update log buffer size from config
-	if cfg.LogBufferSize > 0 {
+	if cfg.GetLogBufferSize() > 0 {
 		logBufferMux.Lock()
-		maxLogBuffer = cfg.LogBufferSize
+		maxLogBuffer = cfg.GetLogBufferSize()
 		logBufferMux.Unlock()
 	}
 }

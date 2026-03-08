@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gemone/model-router/internal/config"
+	"github.com/gemone/model-router/internal/middleware"
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/router"
 	"github.com/gemone/model-router/internal/service"
@@ -26,7 +27,7 @@ func NewChatHandler(profileRouter *router.ProfileRouter) *ChatHandler {
 	return &ChatHandler{
 		profileRouter: profileRouter,
 		stats:         service.GetStatsCollector(),
-		enableStats:   cfg.EnableStats,
+		enableStats:   cfg.GetEnableStats(),
 	}
 }
 
@@ -103,6 +104,8 @@ func (h *ChatHandler) handleNonStreaming(
 	// Call adapter for response
 	resp, err := routeResult.Adapter.ChatCompletion(c.Context(), req)
 	if err != nil {
+		middleware.ErrorLog("ChatCompletion failed: requestID=%s model=%s error=%v",
+			requestID, req.Model, err)
 		go h.recordRequest(requestID, routeResult, req.Model, time.Since(start), false, err.Error())
 		return h.errorResponse(c, http.StatusInternalServerError, "provider_error", err.Error())
 	}
@@ -137,6 +140,8 @@ func (h *ChatHandler) handleStreaming(
 	// Get stream channel from adapter
 	streamChan, err := routeResult.Adapter.ChatCompletionStream(c.Context(), req)
 	if err != nil {
+		middleware.ErrorLog("ChatCompletionStream failed: requestID=%s model=%s error=%v",
+			requestID, req.Model, err)
 		go h.recordRequest(requestID, routeResult, req.Model, time.Since(start), false, err.Error())
 		return h.errorResponse(c, http.StatusInternalServerError, "provider_error", err.Error())
 	}
