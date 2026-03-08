@@ -59,10 +59,45 @@
                             </div>
                         </div>
                         <div class="detail-item">
+                            <span class="detail-label">API 端点格式</span>
+                            <div class="api-endpoints">
+                                <div class="endpoint-item">
+                                    <code class="endpoint-small">POST /api/{{ profile.path }}/v1/chat/completions</code>
+                                </div>
+                                <div class="endpoint-item">
+                                    <code class="endpoint-small">POST /api/openai/{{ profile.path }}/v1/chat/completions</code>
+                                </div>
+                                <div class="endpoint-item">
+                                    <code class="endpoint-small">POST /{{ profile.path }}/v1/chat/completions</code>
+                                </div>
+                                <el-divider class="endpoint-divider">其他格式</el-divider>
+                                <div class="endpoint-item">
+                                    <code class="endpoint-small">POST /api/claude/{{ profile.path }}/v1/messages</code>
+                                </div>
+                                <div class="endpoint-item">
+                                    <code class="endpoint-small">POST /api/ollama/{{ profile.path }}/api/chat</code>
+                                </div>
+                                <div class="endpoint-item">
+                                    <code class="endpoint-small">POST /api/ollama/{{ profile.path }}/api/generate</code>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="detail-item" v-if="profile.api_token_enc">
+                            <span class="detail-label">认证状态</span>
+                            <el-tag type="warning" size="small">需要 Token</el-tag>
+                        </div>
+                        <div class="detail-item">
                             <span class="detail-label">{{ $t("profile.modelsCount") }}</span>
                             <span class="detail-value">
                                 <el-icon><Cpu /></el-icon>
                                 {{ profile.model_ids?.length || 0 }}
+                            </span>
+                        </div>
+                        <div class="detail-item" v-if="profile.route_ids?.length > 0">
+                            <span class="detail-label">{{ $t("profile.routesCount") || '路由' }}</span>
+                            <span class="detail-value">
+                                <el-icon><Share /></el-icon>
+                                {{ profile.route_ids?.length || 0 }}
                             </span>
                         </div>
                         <div class="detail-item">
@@ -153,6 +188,36 @@
                         />
                     </el-select>
                 </el-form-item>
+                <el-form-item :label="$t('profile.routes') || '绑定路由'">
+                    <el-select
+                        v-model="form.route_ids"
+                        multiple
+                        collapse-tags
+                        collapse-tags-tooltip
+                        :placeholder="$t('profile.selectRoutes') || '选择路由策略'"
+                        style="width: 100%"
+                    >
+                        <el-option
+                            v-for="route in store.routeRules"
+                            :key="route.id"
+                            :label="route.name + ' (' + (route.strategy || 'auto') + ')'"
+                            :value="route.id"
+                        />
+                    </el-select>
+                    <div class="form-tip">{{ $t('profile.routesTip') || '通过路由策略动态选择模型' }}</div>
+                </el-form-item>
+                <el-form-item label="API Token">
+                    <el-input
+                        v-model="form.api_token"
+                        type="password"
+                        show-password
+                        placeholder="留空则不需要认证"
+                    />
+                    <div class="form-tip">
+                        为此 Profile 设置独立的访问令牌。如果设置了 Token，客户端需要在请求头中提供
+                        <code>Authorization: Bearer &lt;token&gt;</code> 或查询参数 <code>?token=&lt;token&gt;</code>
+                    </div>
+                </el-form-item>
             </el-form>
             <template #footer>
                 <el-button @click="dialogVisible = false">{{
@@ -198,6 +263,8 @@ const form = ref({
     priority: 0,
     enabled: true,
     model_ids: [],
+    route_ids: [], // 绑定的路由ID列表
+    api_token: "", // API token for profile authentication
 });
 
 const rules = {
@@ -226,6 +293,7 @@ function showAddDialog() {
         priority: 0,
         enabled: true,
         model_ids: [],
+        route_ids: [],
     };
     dialogVisible.value = true;
 }
@@ -269,6 +337,7 @@ function copyEndpoint(path) {
 onMounted(() => {
     store.fetchProfiles();
     store.fetchModels();
+    store.fetchRouteRules();
 });
 </script>
 
@@ -424,6 +493,25 @@ onMounted(() => {
     font-size: 12px;
     color: #909399;
     margin-top: 4px;
+}
+
+.api-endpoints {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.endpoint-item {
+    display: flex;
+    align-items: center;
+}
+
+.endpoint-small {
+    font-size: 11px;
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #606266;
 }
 
 /* Responsive */
