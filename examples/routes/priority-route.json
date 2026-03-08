@@ -1,0 +1,32 @@
+{
+  "id": "priority-route",
+  "name": "Priority Route",
+  "description": "按优先级选择模型，高优先级优先",
+  "enabled": true,
+  "strategy": "priority",
+  "content_type": "all",
+  "model_config": {
+    "models": [
+      {
+        "model_id": "gpt-4",
+        "priority": 10,
+        "weight": 100,
+        "enabled": true
+      },
+      {
+        "model_id": "claude-3-opus",
+        "priority": 9,
+        "weight": 100,
+        "enabled": true
+      },
+      {
+        "model_id": "gpt-3.5-turbo",
+        "priority": 5,
+        "weight": 100,
+        "enabled": true
+      }
+    ]
+  },
+  "health_threshold": 70,
+  "fallback_policy": "next_model"
+}

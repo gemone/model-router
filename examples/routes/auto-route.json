@@ -1,0 +1,44 @@
+{
+  "id": "auto-route",
+  "name": "Auto Selection",
+  "description": "基于健康状态、延迟和成本自动选择最佳模型",
+  "enabled": true,
+  "strategy": "auto",
+  "content_type": "all",
+  "model_config": {
+    "models": [
+      {
+        "model_id": "gpt-4",
+        "priority": 10,
+        "weight": 100,
+        "enabled": true
+      },
+      {
+        "model_id": "claude-3-opus",
+        "priority": 10,
+        "weight": 100,
+        "enabled": true
+      },
+      {
+        "model_id": "gpt-4-turbo",
+        "priority": 8,
+        "weight": 100,
+        "enabled": true
+      },
+      {
+        "model_id": "claude-3-sonnet",
+        "priority": 7,
+        "weight": 100,
+        "enabled": true
+      },
+      {
+        "model_id": "gpt-3.5-turbo",
+        "priority": 5,
+        "weight": 100,
+        "enabled": true
+      }
+    ]
+  },
+  "health_threshold": 50,
+  "fallback_policy": "next_model"
+}

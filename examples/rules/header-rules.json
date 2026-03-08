@@ -1,0 +1,63 @@
+{
+  "rules": [
+    {
+      "id": "rule-user-tier",
+      "name": "Route by User Tier",
+      "description": "根据用户等级路由到不同模型",
+      "priority": 100,
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "header",
+          "field": "X-User-Tier",
+          "op": "eq",
+          "value": "premium"
+        }
+      ],
+      "action": {
+        "type": "route",
+        "target": "premium-route"
+      }
+    },
+    {
+      "id": "rule-api-version",
+      "name": "Route by API Version",
+      "description": "根据 API 版本路由",
+      "priority": 90,
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "header",
+          "field": "X-API-Version",
+          "op": "eq",
+          "value": "v2"
+        }
+      ],
+      "action": {
+        "type": "add_header",
+        "headers": {
+          "X-API-Version-Processed": "v2"
+        }
+      }
+    },
+    {
+      "id": "rule-user-agent",
+      "name": "Route by User Agent",
+      "description": "根据客户端类型选择模型",
+      "priority": 80,
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "header",
+          "field": "User-Agent",
+          "op": "contains",
+          "value": "Mobile"
+        }
+      ],
+      "action": {
+        "type": "model",
+        "target": "lightweight-model"
+      }
+    }
+  ]
+}

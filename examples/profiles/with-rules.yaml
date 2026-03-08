@@ -1,0 +1,97 @@
+# 带规则的 Profile - 智能路由
+# 使用方式: POST /api/smart/v1/chat/completions
+
+id: "smart"
+name: "Smart Router"
+path: "smart"
+description: "基于规则的智能路由"
+enabled: true
+
+# 默认模型
+model_ids:
+  - "gpt-3.5-turbo"
+
+# 路由
+route_ids:
+  - "default-route"
+
+# 规则配置
+rules:
+  # 规则1: 图片请求使用视觉模型
+  - id: "rule-image"
+    name: "Image requests use vision model"
+    priority: 100
+    enabled: true
+    conditions:
+      - type: "content"
+        field: "has_image"
+        op: "eq"
+        value: "true"
+    action:
+      type: "model"
+      target: "gpt-4-vision-preview"
+
+  # 规则2: Premium 用户使用最佳模型
+  - id: "rule-premium"
+    name: "Premium users use best model"
+    priority: 90
+    enabled: true
+    conditions:
+      - type: "header"
+        field: "X-User-Tier"
+        op: "eq"
+        value: "premium"
+    action:
+      type: "route"
+      target: "premium-route"
+
+  # 规则3: 工作时间使用高性能路由
+  - id: "rule-business-hours"
+    name: "Business hours routing"
+    priority: 80
+    enabled: true
+    conditions:
+      - type: "time"
+        field: "hour"
+        op: "between"
+        value: "9-18"
+      - type: "time"
+        field: "weekday"
+        op: "between"
+        value: "1-5"
+    action:
+      type: "route"
+      target: "high-performance-route"
+
+  # 规则4: 长文本使用特定模型
+  - id: "rule-long-context"
+    name: "Long context routing"
+    priority: 70
+    enabled: true
+    conditions:
+      - type: "content"
+        field: "text_length"
+        op: "gt"
+        value: "8000"
+    action:
+      type: "model"
+      target: "claude-3-opus"
+
+  # 规则5: 添加追踪请求头
+  - id: "rule-tracking"
+    name: "Add tracking headers"
+    priority: 1
+    enabled: true
+    conditions: []  # 总是匹配
+    action:
+      type: "add_header"
+      headers:
+        "X-Request-Source": "api-gateway"
+        "X-Routing-Version": "v2"
+        "X-Processed-By": "model-router"
+
+# 功能配置
+enable_compression: true
+compression_strategy: "hybrid"
+compression_level: "threshold"
+compression_threshold: 4000

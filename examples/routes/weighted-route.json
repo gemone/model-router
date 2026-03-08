@@ -1,0 +1,32 @@
+{
+  "id": "weighted-route",
+  "name": "Weighted Load Balancing",
+  "description": "按权重分配请求，实现负载均衡",
+  "enabled": true,
+  "strategy": "weighted",
+  "content_type": "all",
+  "model_config": {
+    "models": [
+      {
+        "model_id": "gpt-4-instance-1",
+        "priority": 1,
+        "weight": 50,
+        "enabled": true
+      },
+      {
+        "model_id": "gpt-4-instance-2",
+        "priority": 1,
+        "weight": 30,
+        "enabled": true
+      },
+      {
+        "model_id": "gpt-4-instance-3",
+        "priority": 1,
+        "weight": 20,
+        "enabled": true
+      }
+    ]
+  },
+  "health_threshold": 60,
+  "fallback_policy": "next_model"
+}

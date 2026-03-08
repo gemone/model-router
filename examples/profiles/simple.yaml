@@ -1,0 +1,19 @@
+# 简单 Profile - 直接模型绑定
+# 使用方式: POST /api/simple/v1/chat/completions
+
+id: "simple"
+name: "Simple Profile"
+path: "simple"
+description: "直接绑定 GPT-4 和 GPT-3.5 模型"
+enabled: true
+
+# 直接模型绑定 - 请求会直接路由到这些模型
+model_ids:
+  - "gpt-4"
+  - "gpt-3.5-turbo"
+
+# 认证配置（可选）
+# api_token: "your-secret-token"
+
+# 上下文压缩配置（可选）
+enable_compression: false

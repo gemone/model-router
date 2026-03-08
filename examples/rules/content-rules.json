@@ -1,0 +1,101 @@
+{
+  "rules": [
+    {
+      "id": "rule-image",
+      "name": "Image Content Routing",
+      "description": "图片请求路由到视觉模型",
+      "priority": 100,
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "content",
+          "field": "has_image",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "action": {
+        "type": "model",
+        "target": "gpt-4-vision-preview"
+      }
+    },
+    {
+      "id": "rule-multiple-images",
+      "name": "Multiple Images Routing",
+      "description": "多图片请求路由到更强的模型",
+      "priority": 95,
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "content",
+          "field": "image_count",
+          "op": "gt",
+          "value": "1"
+        }
+      ],
+      "action": {
+        "type": "model",
+        "target": "claude-3-opus"
+      }
+    },
+    {
+      "id": "rule-long-context",
+      "name": "Long Context Routing",
+      "description": "长文本使用支持长上下文的模型",
+      "priority": 90,
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "content",
+          "field": "text_length",
+          "op": "gt",
+          "value": "10000"
+        }
+      ],
+      "action": {
+        "type": "model",
+        "target": "claude-3-opus"
+      }
+    },
+    {
+      "id": "rule-function-calling",
+      "name": "Function Calling Routing",
+      "description": "函数调用请求使用支持的模型",
+      "priority": 85,
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "content",
+          "field": "has_function",
+          "op": "eq",
+          "value": "true"
+        }
+      ],
+      "action": {
+        "type": "route",
+        "target": "function-supporting-route"
+      }
+    },
+    {
+      "id": "rule-chinese",
+      "name": "Chinese Content Routing",
+      "description": "中文内容使用中文优化模型",
+      "priority": 70,
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "content",
+          "field": "language",
+          "op": "eq",
+          "value": "zh"
+        }
+      ],
+      "action": {
+        "type": "add_header",
+        "headers": {
+          "X-Language-Detected": "zh"
+        }
+      }
+    }
+  ]
+}
