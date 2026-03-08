@@ -126,13 +126,13 @@ function handleLanguageChange(lang) {
   localStorage.setItem('locale', lang)
 }
 
-function handleCommand(command) {
+async function handleCommand(command) {
   switch (command) {
     case 'settings':
       router.push('/settings')
       break
     case 'logout':
-      // TODO: implement logout
+      await store.logout()
       router.push('/login')
       break
   }

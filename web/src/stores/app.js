@@ -22,6 +22,102 @@ export const useAppStore = defineStore('app', () => {
   const loading = ref(false)
   const sidebarCollapsed = ref(false)
 
+  // Authentication state
+  const token = ref(localStorage.getItem('admin_token') || '')
+  const isAuthenticated = computed(() => !!token.value)
+
+  // Store interceptor IDs to prevent memory leaks
+  let requestInterceptorId = null
+  let responseInterceptorId = null
+
+  // Authentication methods
+  function setToken(newToken) {
+    token.value = newToken
+    if (newToken) {
+      localStorage.setItem('admin_token', newToken)
+    } else {
+      localStorage.removeItem('admin_token')
+    }
+    // Update interceptor without re-registering
+    // The interceptor uses the reactive token.value, so it will automatically pick up changes
+  }
+
+  function clearToken() {
+    token.value = ''
+    localStorage.removeItem('admin_token')
+  }
+
+  async function login(password) {
+    try {
+      const { data } = await axios.post('/api/admin/login', { password })
+      if (data.success) {
+        // The backend doesn't return the token in the response for security
+        // Use the password directly as the token (since ADMIN_TOKEN IS the password in this design)
+        setToken(password)
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error('Login failed:', error)
+      throw error
+    }
+  }
+
+  async function logout() {
+    try {
+      await axios.post('/api/admin/logout')
+    } finally {
+      clearToken()
+    }
+  }
+
+  async function checkAuth() {
+    try {
+      const { data } = await axios.get('/api/admin/auth/status')
+      return data.enabled
+    } catch {
+      return false
+    }
+  }
+
+  // Setup axios interceptor for token authentication (only once)
+  function setupAxiosInterceptor() {
+    // Remove existing interceptors if they exist
+    if (requestInterceptorId !== null) {
+      axios.interceptors.request.eject(requestInterceptorId)
+    }
+    if (responseInterceptorId !== null) {
+      axios.interceptors.response.eject(responseInterceptorId)
+    }
+
+    // Register new interceptors
+    requestInterceptorId = axios.interceptors.request.use(
+      (config) => {
+        if (token.value) {
+          config.headers.Authorization = `Bearer ${token.value}`
+        }
+        return config
+      },
+      (error) => {
+        return Promise.reject(error)
+      }
+    )
+
+    responseInterceptorId = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          clearToken()
+          window.location.hash = '/login'
+        }
+        return Promise.reject(error)
+      }
+    )
+  }
+
+  // Initialize interceptor on store creation
+  setupAxiosInterceptor()
+
   // Getters
   const profileOptions = computed(() => {
     return profiles.value.map(p => ({ label: p.name, value: p.id }))
@@ -232,6 +328,46 @@ export const useAppStore = defineStore('app', () => {
     await fetchRouteRules()
   }
 
+  // Rule management
+  async function fetchRules() {
+    loading.value = true
+    try {
+      const { data } = await axios.get('/api/admin/rules')
+      return data
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchRulesByProfile(profileId) {
+    const { data } = await axios.get(`/api/admin/profiles/${profileId}/rules`)
+    return data
+  }
+
+  async function createRule(rule) {
+    const { data } = await axios.post('/api/admin/rules', rule)
+    return data
+  }
+
+  async function updateRule(id, rule) {
+    const { data } = await axios.put(`/api/admin/rules/${id}`, rule)
+    return data
+  }
+
+  async function deleteRule(id) {
+    await axios.delete(`/api/admin/rules/${id}`)
+  }
+
+  async function enableRule(id) {
+    const { data } = await axios.put(`/api/admin/rules/${id}/enable`)
+    return data
+  }
+
+  async function disableRule(id) {
+    const { data } = await axios.put(`/api/admin/rules/${id}/disable`)
+    return data
+  }
+
   return {
     // State
     profiles,
@@ -244,6 +380,8 @@ export const useAppStore = defineStore('app', () => {
     logs,
     loading,
     sidebarCollapsed,
+    token,
+    isAuthenticated,
     // Getters
     profileOptions,
     providerOptions,
@@ -274,5 +412,20 @@ export const useAppStore = defineStore('app', () => {
     createRouteRule,
     updateRouteRule,
     deleteRouteRule,
+    // Rule management
+    fetchRules,
+    fetchRulesByProfile,
+    createRule,
+    updateRule,
+    deleteRule,
+    enableRule,
+    disableRule,
+    // Authentication
+    setToken,
+    clearToken,
+    login,
+    logout,
+    checkAuth,
+    setupAxiosInterceptor,
   }
 })
