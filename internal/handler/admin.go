@@ -1,19 +1,22 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/gemone/model-router/internal/adapter"
 	"github.com/gemone/model-router/internal/config"
 	"github.com/gemone/model-router/internal/database"
 	"github.com/gemone/model-router/internal/middleware"
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/service"
 	"github.com/gemone/model-router/internal/utils"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
 
@@ -117,7 +120,7 @@ func (h *AdminHandler) RegisterRoutes(r fiber.Router) {
 
 // ListProfiles lists all profiles
 // Note: API tokens are intentionally omitted from responses for security.
-func (h *AdminHandler) ListProfiles(c *fiber.Ctx) error {
+func (h *AdminHandler) ListProfiles(c fiber.Ctx) error {
 	profiles := h.profileManager.GetAllProfiles()
 	// Clear API Token and encrypted fields
 	for i := range profiles {
@@ -128,7 +131,7 @@ func (h *AdminHandler) ListProfiles(c *fiber.Ctx) error {
 }
 
 // GetProfile gets a single profile
-func (h *AdminHandler) GetProfile(c *fiber.Ctx) error {
+func (h *AdminHandler) GetProfile(c fiber.Ctx) error {
 	id := c.Params("id")
 	profileInstance := h.profileManager.GetProfileByID(id)
 	if profileInstance == nil {
@@ -141,13 +144,13 @@ func (h *AdminHandler) GetProfile(c *fiber.Ctx) error {
 }
 
 // CreateProfile creates a new profile
-func (h *AdminHandler) CreateProfile(c *fiber.Ctx) error {
+func (h *AdminHandler) CreateProfile(c fiber.Ctx) error {
 	var req struct {
 		model.Profile
 		APIToken string `json:"api_token"` // Receive plaintext token
 	}
 
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -174,7 +177,7 @@ func (h *AdminHandler) CreateProfile(c *fiber.Ctx) error {
 }
 
 // UpdateProfile updates a profile
-func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
+func (h *AdminHandler) UpdateProfile(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	// Get existing profile first
@@ -199,7 +202,7 @@ func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
 		RouteIDs            []string `json:"route_ids"`
 		APIToken            *string  `json:"api_token"` // API Token update field
 	}
-	if err := c.BodyParser(&updates); err != nil {
+	if err := c.Bind().Body(&updates); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -257,7 +260,7 @@ func (h *AdminHandler) UpdateProfile(c *fiber.Ctx) error {
 }
 
 // DeleteProfile deletes a profile
-func (h *AdminHandler) DeleteProfile(c *fiber.Ctx) error {
+func (h *AdminHandler) DeleteProfile(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := h.profileManager.DeleteProfile(id); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -270,7 +273,7 @@ func (h *AdminHandler) DeleteProfile(c *fiber.Ctx) error {
 // ListProviders lists all providers
 // Note: API keys are intentionally omitted from responses for security.
 // The APIKey field is cleared and APIKeyEnc (encrypted) is never returned.
-func (h *AdminHandler) ListProviders(c *fiber.Ctx) error {
+func (h *AdminHandler) ListProviders(c fiber.Ctx) error {
 	db := database.GetDB()
 	var providers []model.Provider
 	if err := db.Find(&providers).Error; err != nil {
@@ -287,7 +290,7 @@ func (h *AdminHandler) ListProviders(c *fiber.Ctx) error {
 }
 
 // GetProvider gets a single provider
-func (h *AdminHandler) GetProvider(c *fiber.Ctx) error {
+func (h *AdminHandler) GetProvider(c fiber.Ctx) error {
 	id := c.Params("id")
 	db := database.GetDB()
 
@@ -303,13 +306,13 @@ func (h *AdminHandler) GetProvider(c *fiber.Ctx) error {
 }
 
 // CreateProvider creates a new provider
-func (h *AdminHandler) CreateProvider(c *fiber.Ctx) error {
+func (h *AdminHandler) CreateProvider(c fiber.Ctx) error {
 	var req struct {
 		model.Provider
 		APIKey string `json:"api_key"`
 	}
 
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -339,7 +342,7 @@ func (h *AdminHandler) CreateProvider(c *fiber.Ctx) error {
 }
 
 // UpdateProvider updates a provider
-func (h *AdminHandler) UpdateProvider(c *fiber.Ctx) error {
+func (h *AdminHandler) UpdateProvider(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	var req struct {
@@ -347,7 +350,7 @@ func (h *AdminHandler) UpdateProvider(c *fiber.Ctx) error {
 		APIKey string `json:"api_key"`
 	}
 
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -386,7 +389,7 @@ func (h *AdminHandler) UpdateProvider(c *fiber.Ctx) error {
 }
 
 // DeleteProvider deletes a provider
-func (h *AdminHandler) DeleteProvider(c *fiber.Ctx) error {
+func (h *AdminHandler) DeleteProvider(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	db := database.GetDB()
@@ -408,7 +411,7 @@ func (h *AdminHandler) DeleteProvider(c *fiber.Ctx) error {
 // ==================== Model Management ====================
 
 // ListModels lists all models
-func (h *AdminHandler) ListModels(c *fiber.Ctx) error {
+func (h *AdminHandler) ListModels(c fiber.Ctx) error {
 	db := database.GetDB()
 	var models []model.Model
 
@@ -428,7 +431,7 @@ func (h *AdminHandler) ListModels(c *fiber.Ctx) error {
 }
 
 // GetModel gets a single model
-func (h *AdminHandler) GetModel(c *fiber.Ctx) error {
+func (h *AdminHandler) GetModel(c fiber.Ctx) error {
 	id := c.Params("id")
 	db := database.GetDB()
 
@@ -441,9 +444,9 @@ func (h *AdminHandler) GetModel(c *fiber.Ctx) error {
 }
 
 // CreateModel creates a new model
-func (h *AdminHandler) CreateModel(c *fiber.Ctx) error {
+func (h *AdminHandler) CreateModel(c fiber.Ctx) error {
 	var m model.Model
-	if err := c.BodyParser(&m); err != nil {
+	if err := c.Bind().Body(&m); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -461,11 +464,11 @@ func (h *AdminHandler) CreateModel(c *fiber.Ctx) error {
 }
 
 // UpdateModel updates a model
-func (h *AdminHandler) UpdateModel(c *fiber.Ctx) error {
+func (h *AdminHandler) UpdateModel(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	var m model.Model
-	if err := c.BodyParser(&m); err != nil {
+	if err := c.Bind().Body(&m); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	m.ID = id
@@ -488,7 +491,7 @@ func (h *AdminHandler) UpdateModel(c *fiber.Ctx) error {
 }
 
 // DeleteModel deletes a model
-func (h *AdminHandler) DeleteModel(c *fiber.Ctx) error {
+func (h *AdminHandler) DeleteModel(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	db := database.GetDB()
@@ -505,7 +508,7 @@ func (h *AdminHandler) DeleteModel(c *fiber.Ctx) error {
 // ==================== Route Management ====================
 
 // ListRoutes lists all routes
-func (h *AdminHandler) ListRoutes(c *fiber.Ctx) error {
+func (h *AdminHandler) ListRoutes(c fiber.Ctx) error {
 	db := database.GetDB()
 	var routes []model.Route
 	if err := db.Find(&routes).Error; err != nil {
@@ -579,7 +582,7 @@ func (h *AdminHandler) ListRoutes(c *fiber.Ctx) error {
 }
 
 // GetRoute gets a single route
-func (h *AdminHandler) GetRoute(c *fiber.Ctx) error {
+func (h *AdminHandler) GetRoute(c fiber.Ctx) error {
 	id := c.Params("id")
 	db := database.GetDB()
 
@@ -665,9 +668,9 @@ type CreateRouteRequest struct {
 }
 
 // CreateRoute creates a route
-func (h *AdminHandler) CreateRoute(c *fiber.Ctx) error {
+func (h *AdminHandler) CreateRoute(c fiber.Ctx) error {
 	var req CreateRouteRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -784,11 +787,11 @@ type UpdateRouteRequest struct {
 }
 
 // UpdateRoute updates a route
-func (h *AdminHandler) UpdateRoute(c *fiber.Ctx) error {
+func (h *AdminHandler) UpdateRoute(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	var req UpdateRouteRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -918,7 +921,7 @@ func (h *AdminHandler) UpdateRoute(c *fiber.Ctx) error {
 }
 
 // DeleteRoute deletes a route
-func (h *AdminHandler) DeleteRoute(c *fiber.Ctx) error {
+func (h *AdminHandler) DeleteRoute(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	db := database.GetDB()
@@ -933,13 +936,13 @@ func (h *AdminHandler) DeleteRoute(c *fiber.Ctx) error {
 }
 
 // DetectModelCapabilities detects model capabilities
-func (h *AdminHandler) DetectModelCapabilities(c *fiber.Ctx) error {
+func (h *AdminHandler) DetectModelCapabilities(c fiber.Ctx) error {
 	var req struct {
 		ProviderID string `json:"provider_id"`
 		ModelName  string `json:"model_name"`
 	}
 
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -971,8 +974,8 @@ func detectFunctionCapability(providerType, modelName string) bool {
 		}
 	}
 
-	// Anthropic models
-	if providerType == "anthropic" {
+	// Anthropic/Claude models
+	if providerType == "claude" || providerType == "anthropic" {
 		// Claude 3 series supports function calling
 		if contains(modelName, "claude-3") {
 			return true
@@ -999,8 +1002,8 @@ func detectVisionCapability(providerType, modelName string) bool {
 		}
 	}
 
-	// Anthropic models - Claude 3 series all support vision
-	if providerType == "anthropic" {
+	// Anthropic/Claude models - Claude 3 series all support vision
+	if providerType == "claude" || providerType == "anthropic" {
 		if contains(modelName, "claude-3") {
 			return true
 		}
@@ -1031,7 +1034,7 @@ func contains(s, substr string) bool {
 // ==================== Statistics ====================
 
 // GetDashboardStats gets dashboard statistics
-func (h *AdminHandler) GetDashboardStats(c *fiber.Ctx) error {
+func (h *AdminHandler) GetDashboardStats(c fiber.Ctx) error {
 	stats := h.stats.GetDashboardStats()
 
 	// Add active model and provider counts
@@ -1047,27 +1050,27 @@ func (h *AdminHandler) GetDashboardStats(c *fiber.Ctx) error {
 }
 
 // GetTrendStats gets trend statistics (last 24 hours)
-func (h *AdminHandler) GetTrendStats(c *fiber.Ctx) error {
+func (h *AdminHandler) GetTrendStats(c fiber.Ctx) error {
 	stats := h.stats.GetTrendStats()
 	return c.JSON(stats)
 }
 
 // GetProviderStats gets provider statistics
-func (h *AdminHandler) GetProviderStats(c *fiber.Ctx) error {
+func (h *AdminHandler) GetProviderStats(c fiber.Ctx) error {
 	id := c.Params("id")
 	stats := h.stats.GetProviderStats(id)
 	return c.JSON(stats)
 }
 
 // GetModelStats gets model statistics
-func (h *AdminHandler) GetModelStats(c *fiber.Ctx) error {
+func (h *AdminHandler) GetModelStats(c fiber.Ctx) error {
 	name := c.Params("name")
 	stats := h.stats.GetModelStats(name)
 	return c.JSON(stats)
 }
 
 // GetAllProviderModelStats gets detailed statistics for all providers and models
-func (h *AdminHandler) GetAllProviderModelStats(c *fiber.Ctx) error {
+func (h *AdminHandler) GetAllProviderModelStats(c fiber.Ctx) error {
 	stats := h.stats.GetAllProviderModelStats()
 	return c.JSON(stats)
 }
@@ -1075,7 +1078,7 @@ func (h *AdminHandler) GetAllProviderModelStats(c *fiber.Ctx) error {
 // ==================== Logs ====================
 
 // GetLogs gets logs
-func (h *AdminHandler) GetLogs(c *fiber.Ctx) error {
+func (h *AdminHandler) GetLogs(c fiber.Ctx) error {
 	page := 1
 	pageSize := 50
 
@@ -1098,7 +1101,7 @@ func (h *AdminHandler) GetLogs(c *fiber.Ctx) error {
 }
 
 // ClearLogs clears logs
-func (h *AdminHandler) ClearLogs(c *fiber.Ctx) error {
+func (h *AdminHandler) ClearLogs(c fiber.Ctx) error {
 	if err := h.stats.ClearLogs(); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -1108,11 +1111,12 @@ func (h *AdminHandler) ClearLogs(c *fiber.Ctx) error {
 // ==================== Testing ====================
 
 // TestModel tests a model
-func (h *AdminHandler) TestModel(c *fiber.Ctx) error {
+func (h *AdminHandler) TestModel(c fiber.Ctx) error {
 	var req struct {
-		Model string `json:"model"`
+		ProviderID string `json:"provider_id"`
+		Model      string `json:"model"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		middleware.ErrorLog("TestModel BodyParser failed: %v", err)
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -1121,13 +1125,88 @@ func (h *AdminHandler) TestModel(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "model is required"})
 	}
 
-	result, err := h.profileManager.TestModel(c.Context(), req.Model)
+	var result *model.TestResult
+	var err error
+
+	// If provider_id is provided, use ProfileInstance.TestModel with specific provider
+	if req.ProviderID != "" {
+		// Find the profile instance that contains this provider
+		result, err = h.testModelWithProvider(c.Context(), req.ProviderID, req.Model)
+	} else {
+		// Auto-detect provider
+		result, err = h.profileManager.TestModel(c.Context(), req.Model)
+	}
+
 	if err != nil {
-		middleware.ErrorLog("TestModel failed: model=%s error=%v", req.Model, err)
+		middleware.ErrorLog("TestModel failed: provider=%s model=%s error=%v", req.ProviderID, req.Model, err)
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}
 
 	return c.JSON(result)
+}
+
+// testModelWithProvider tests a model using a specific provider
+func (h *AdminHandler) testModelWithProvider(ctx context.Context, providerID, modelName string) (*model.TestResult, error) {
+	// Query provider from database
+	db := database.GetDB()
+	var provider model.Provider
+	if err := db.Where("id = ? AND enabled = ?", providerID, true).First(&provider).Error; err != nil {
+		return nil, fmt.Errorf("provider not found: %s", providerID)
+	}
+
+	// Query model from database
+	var targetModel model.Model
+	if err := db.Where("name = ? AND provider_id = ? AND enabled = ?", modelName, providerID, true).First(&targetModel).Error; err != nil {
+		return nil, fmt.Errorf("model not found: %s", modelName)
+	}
+
+	// Create adapter
+	adp := adapter.Create(provider.Type)
+	if adp == nil {
+		return nil, fmt.Errorf("unsupported provider type: %s", provider.Type)
+	}
+	if err := adp.Init(&provider); err != nil {
+		if strings.Contains(err.Error(), "decrypt") || strings.Contains(err.Error(), "encryption") {
+			return nil, fmt.Errorf("failed to decrypt API key. Please re-configure the provider's API key. Error: %v", err)
+		}
+		return nil, fmt.Errorf("failed to init adapter: %v", err)
+	}
+
+	// Use OriginalName for the actual API call, fallback to modelName if empty
+	actualModelName := modelName
+	if targetModel.OriginalName != "" {
+		actualModelName = targetModel.OriginalName
+	}
+
+	// Build request
+	req := &model.ChatCompletionRequest{
+		Model: actualModelName,
+		Messages: []model.Message{
+			{Role: "user", Content: "Hello, this is a test message. Please respond with 'OK'."},
+		},
+		MaxTokens: 50,
+	}
+
+	// Send request
+	start := time.Now()
+	_, err := adp.ChatCompletion(ctx, req)
+	latency := time.Since(start).Milliseconds()
+
+	testResult := &model.TestResult{
+		ProviderID: providerID,
+		Model:      modelName,
+		Latency:    latency,
+		CreatedAt:  time.Now(),
+	}
+
+	if err != nil {
+		testResult.Success = false
+		testResult.Error = err.Error()
+	} else {
+		testResult.Success = true
+	}
+
+	return testResult, nil
 }
 
 // ==================== Settings Management ====================
@@ -1151,7 +1230,7 @@ type SettingsRequest struct {
 }
 
 // GetSettings gets system settings
-func (h *AdminHandler) GetSettings(c *fiber.Ctx) error {
+func (h *AdminHandler) GetSettings(c fiber.Ctx) error {
 	cfg := config.Get()
 
 	settings := fiber.Map{
@@ -1172,9 +1251,9 @@ func (h *AdminHandler) GetSettings(c *fiber.Ctx) error {
 }
 
 // UpdateSettings updates system settings
-func (h *AdminHandler) UpdateSettings(c *fiber.Ctx) error {
+func (h *AdminHandler) UpdateSettings(c fiber.Ctx) error {
 	var req SettingsRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -1226,7 +1305,7 @@ func (h *AdminHandler) UpdateSettings(c *fiber.Ctx) error {
 // ==================== Log Level Management ====================
 
 // GetLogLevel gets current log level
-func (h *AdminHandler) GetLogLevel(c *fiber.Ctx) error {
+func (h *AdminHandler) GetLogLevel(c fiber.Ctx) error {
 	level := middleware.GetLogLevelString()
 	return c.JSON(fiber.Map{
 		"level":            level,
@@ -1241,9 +1320,9 @@ type SetLogLevelRequest struct {
 }
 
 // SetLogLevel sets log level
-func (h *AdminHandler) SetLogLevel(c *fiber.Ctx) error {
+func (h *AdminHandler) SetLogLevel(c fiber.Ctx) error {
 	var req SetLogLevelRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error":   "invalid request body",
 			"message": err.Error(),
@@ -1294,7 +1373,7 @@ func getLogLevelDescription(level string) string {
 }
 
 // GetServerLogs gets server real-time logs (supports pagination and search)
-func (h *AdminHandler) GetServerLogs(c *fiber.Ctx) error {
+func (h *AdminHandler) GetServerLogs(c fiber.Ctx) error {
 	// Parse query parameters
 	level := c.Query("level", "")
 	keyword := c.Query("keyword", "")
@@ -1347,7 +1426,7 @@ func (h *AdminHandler) GetServerLogs(c *fiber.Ctx) error {
 }
 
 // GetServerLogDetail gets log details for a specific request
-func (h *AdminHandler) GetServerLogDetail(c *fiber.Ctx) error {
+func (h *AdminHandler) GetServerLogDetail(c fiber.Ctx) error {
 	requestID := c.Params("request_id")
 	if requestID == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -1370,7 +1449,7 @@ func (h *AdminHandler) GetServerLogDetail(c *fiber.Ctx) error {
 }
 
 // ClearServerLogs clears server log buffer
-func (h *AdminHandler) ClearServerLogs(c *fiber.Ctx) error {
+func (h *AdminHandler) ClearServerLogs(c fiber.Ctx) error {
 	middleware.GetLogStore().Clear()
 	middleware.ClearBuffer()
 	return c.JSON(fiber.Map{
@@ -1393,9 +1472,9 @@ type LoginResponse struct {
 }
 
 // Login handles login request
-func (h *AdminHandler) Login(c *fiber.Ctx) error {
+func (h *AdminHandler) Login(c fiber.Ctx) error {
 	var req LoginRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
 			"error":   "invalid request body",
@@ -1431,7 +1510,7 @@ func (h *AdminHandler) Login(c *fiber.Ctx) error {
 }
 
 // Logout handles logout request
-func (h *AdminHandler) Logout(c *fiber.Ctx) error {
+func (h *AdminHandler) Logout(c fiber.Ctx) error {
 	// Since we use stateless token authentication, logout is mainly handled on the frontend
 	// Backend just returns a success response
 	return c.JSON(fiber.Map{
@@ -1441,7 +1520,7 @@ func (h *AdminHandler) Logout(c *fiber.Ctx) error {
 }
 
 // GetAuthStatus gets authentication status
-func (h *AdminHandler) GetAuthStatus(c *fiber.Ctx) error {
+func (h *AdminHandler) GetAuthStatus(c fiber.Ctx) error {
 	cfg := config.GetConfig()
 
 	return c.JSON(fiber.Map{
