@@ -9,7 +9,7 @@ import (
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/repository"
 	"github.com/gemone/model-router/internal/service"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // CompressionAdminHandler manages compression group endpoints
@@ -39,7 +39,7 @@ func (h *CompressionAdminHandler) RegisterRoutes(r fiber.Router) {
 
 // ListCompressionGroups lists all compression groups for a profile
 // GET /api/admin/profiles/:profile_id/compression-groups
-func (h *CompressionAdminHandler) ListCompressionGroups(c *fiber.Ctx) error {
+func (h *CompressionAdminHandler) ListCompressionGroups(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 
 	profile := h.profileManager.GetProfile(profileID)
@@ -57,12 +57,12 @@ func (h *CompressionAdminHandler) ListCompressionGroups(c *fiber.Ctx) error {
 
 // UpsertCompressionGroup creates or updates a compression group
 // PUT /api/admin/profiles/:profile_id/compression-groups/:group_name
-func (h *CompressionAdminHandler) UpsertCompressionGroup(c *fiber.Ctx) error {
+func (h *CompressionAdminHandler) UpsertCompressionGroup(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 	groupName := c.Params("group_name")
 
 	var req model.CompressionModelGroup
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
@@ -110,7 +110,7 @@ func (h *CompressionAdminHandler) UpsertCompressionGroup(c *fiber.Ctx) error {
 
 // DeleteCompressionGroup deletes a compression group
 // DELETE /api/admin/profiles/:profile_id/compression-groups/:group_name
-func (h *CompressionAdminHandler) DeleteCompressionGroup(c *fiber.Ctx) error {
+func (h *CompressionAdminHandler) DeleteCompressionGroup(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 	groupName := c.Params("group_name")
 
@@ -138,7 +138,7 @@ func (h *CompressionAdminHandler) DeleteCompressionGroup(c *fiber.Ctx) error {
 
 // GetCompressionGroupHealth returns health status for a compression group
 // GET /api/admin/profiles/:profile_id/compression-groups/:group_name/health
-func (h *CompressionAdminHandler) GetCompressionGroupHealth(c *fiber.Ctx) error {
+func (h *CompressionAdminHandler) GetCompressionGroupHealth(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 	groupName := c.Params("group_name")
 

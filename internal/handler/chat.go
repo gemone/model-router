@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -10,8 +12,9 @@ import (
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/router"
 	"github.com/gemone/model-router/internal/service"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/valyala/fasthttp"
 )
 
 // ChatHandler handles OpenAI-compatible chat completion requests.
@@ -47,7 +50,7 @@ func (h *ChatHandler) RegisterRoutes(app *fiber.App) {
 }
 
 // HandleChatCompletions processes chat completion requests (streaming and non-streaming).
-func (h *ChatHandler) HandleChatCompletions(c *fiber.Ctx) error {
+func (h *ChatHandler) HandleChatCompletions(c fiber.Ctx) error {
 	requestID := uuid.New().String()
 	start := time.Now()
 
@@ -90,7 +93,7 @@ func (h *ChatHandler) parseChatRequest(body []byte) (*model.ChatCompletionReques
 
 // handleNonStreaming handles non-streaming chat completion requests.
 func (h *ChatHandler) handleNonStreaming(
-	c *fiber.Ctx,
+	c fiber.Ctx,
 	req *model.ChatCompletionRequest,
 	routeResult *router.RouteResult,
 	requestID string,
@@ -120,7 +123,7 @@ func (h *ChatHandler) handleNonStreaming(
 
 // handleStreaming handles streaming chat completion requests with SSE.
 func (h *ChatHandler) handleStreaming(
-	c *fiber.Ctx,
+	c fiber.Ctx,
 	req *model.ChatCompletionRequest,
 	routeResult *router.RouteResult,
 	requestID string,
@@ -146,28 +149,23 @@ func (h *ChatHandler) handleStreaming(
 		return h.errorResponse(c, http.StatusInternalServerError, "provider_error", err.Error())
 	}
 
-	// Stream responses
-	flusher, ok := c.Context().Response.BodyWriter().(http.Flusher)
-	if !ok {
-		return h.errorResponse(c, http.StatusInternalServerError, "stream_error", "streaming not supported")
-	}
+	// Stream responses using SetBodyStreamWriter
+	c.Status(http.StatusOK).RequestCtx().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
+		// Send each chunk
+		for chunk := range streamChan {
+			data, err := json.Marshal(chunk)
+			if err != nil {
+				break
+			}
 
-	// Send each chunk
-	for chunk := range streamChan {
-		data, err := json.Marshal(chunk)
-		if err != nil {
-			break
+			fmt.Fprintf(w, "data: %s\n\n", string(data))
+			w.Flush()
 		}
 
-		c.Write([]byte("data: "))
-		c.Write(data)
-		c.Write([]byte("\n\n"))
-		flusher.Flush()
-	}
-
-	// Send final [DONE] message
-	c.Write([]byte("data: [DONE]\n\n"))
-	flusher.Flush()
+		// Send final [DONE] message
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		w.Flush()
+	}))
 
 	// Record successful request
 	go h.recordRequest(requestID, routeResult, req.Model, time.Since(start), true, "")
@@ -206,7 +204,7 @@ func (h *ChatHandler) recordRequest(
 }
 
 // errorResponse returns an OpenAI-compatible error response.
-func (h *ChatHandler) errorResponse(c *fiber.Ctx, status int, errorCode, message string) error {
+func (h *ChatHandler) errorResponse(c fiber.Ctx, status int, errorCode, message string) error {
 	resp := model.ErrorResponse{
 		Error: model.APIError{
 			Message: message,

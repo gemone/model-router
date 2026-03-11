@@ -5,7 +5,7 @@ import (
 
 	"github.com/gemone/model-router/internal/database"
 	"github.com/gemone/model-router/internal/model"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
 
@@ -31,7 +31,7 @@ func (h *RuleAdminHandler) RegisterRoutes(app *fiber.App) {
 }
 
 // handleListRules 获取所有规则
-func (h *RuleAdminHandler) handleListRules(c *fiber.Ctx) error {
+func (h *RuleAdminHandler) handleListRules(c fiber.Ctx) error {
 	db := database.GetDB()
 
 	var rules []model.Rule
@@ -45,7 +45,7 @@ func (h *RuleAdminHandler) handleListRules(c *fiber.Ctx) error {
 }
 
 // handleGetRule 获取单个规则
-func (h *RuleAdminHandler) handleGetRule(c *fiber.Ctx) error {
+func (h *RuleAdminHandler) handleGetRule(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	db := database.GetDB()
@@ -61,7 +61,7 @@ func (h *RuleAdminHandler) handleGetRule(c *fiber.Ctx) error {
 }
 
 // handleListRulesByProfile 获取 Profile 的规则
-func (h *RuleAdminHandler) handleListRulesByProfile(c *fiber.Ctx) error {
+func (h *RuleAdminHandler) handleListRulesByProfile(c fiber.Ctx) error {
 	profileID := c.Params("profileId")
 
 	db := database.GetDB()
@@ -88,9 +88,9 @@ type RuleCreateRequest struct {
 }
 
 // handleCreateRule 创建规则
-func (h *RuleAdminHandler) handleCreateRule(c *fiber.Ctx) error {
+func (h *RuleAdminHandler) handleCreateRule(c fiber.Ctx) error {
 	var req RuleCreateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
 		})
@@ -134,11 +134,11 @@ func (h *RuleAdminHandler) handleCreateRule(c *fiber.Ctx) error {
 }
 
 // handleUpdateRule 更新规则
-func (h *RuleAdminHandler) handleUpdateRule(c *fiber.Ctx) error {
+func (h *RuleAdminHandler) handleUpdateRule(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	var req RuleCreateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
 		})
@@ -179,7 +179,7 @@ func (h *RuleAdminHandler) handleUpdateRule(c *fiber.Ctx) error {
 }
 
 // handleDeleteRule 删除规则
-func (h *RuleAdminHandler) handleDeleteRule(c *fiber.Ctx) error {
+func (h *RuleAdminHandler) handleDeleteRule(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	db := database.GetDB()
@@ -201,7 +201,7 @@ func (h *RuleAdminHandler) handleDeleteRule(c *fiber.Ctx) error {
 }
 
 // handleEnableRule 启用规则
-func (h *RuleAdminHandler) handleEnableRule(c *fiber.Ctx) error {
+func (h *RuleAdminHandler) handleEnableRule(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	db := database.GetDB()
@@ -224,7 +224,7 @@ func (h *RuleAdminHandler) handleEnableRule(c *fiber.Ctx) error {
 }
 
 // handleDisableRule 禁用规则
-func (h *RuleAdminHandler) handleDisableRule(c *fiber.Ctx) error {
+func (h *RuleAdminHandler) handleDisableRule(c fiber.Ctx) error {
 	id := c.Params("id")
 
 	db := database.GetDB()

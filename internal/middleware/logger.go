@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gemone/model-router/internal/config"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // LogLevel 日志级别
@@ -138,7 +138,7 @@ func ClearBuffer() {
 
 // Logger 日志中间件
 func Logger() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		start := time.Now()
 
 		// 获取请求体（如果是 debug 级别）
@@ -212,7 +212,7 @@ func Logger() fiber.Handler {
 }
 
 // getDebugInfo 获取调试信息字符串
-func getDebugInfo(c *fiber.Ctx, requestBody []byte, userAgent string, duration time.Duration) string {
+func getDebugInfo(c fiber.Ctx, requestBody []byte, userAgent string, duration time.Duration) string {
 	var sb strings.Builder
 
 	// 打印请求头
@@ -322,7 +322,7 @@ func ErrorLog(format string, args ...interface{}) {
 }
 
 // LogRequest 记录特定请求的详细信息（用于外部调用）
-func LogRequest(ctx *fiber.Ctx, label string, extra map[string]interface{}) {
+func LogRequest(ctx fiber.Ctx, label string, extra map[string]interface{}) {
 	if !shouldLog(LevelDebug) {
 		return
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/repository"
 	"github.com/gemone/model-router/internal/service"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // CompositeAdminHandler manages composite model endpoints
@@ -40,7 +40,7 @@ func (h *CompositeAdminHandler) RegisterRoutes(r fiber.Router) {
 
 // ListCompositeModels lists all composite models for a profile
 // GET /api/admin/profiles/:profile_id/composite-models
-func (h *CompositeAdminHandler) ListCompositeModels(c *fiber.Ctx) error {
+func (h *CompositeAdminHandler) ListCompositeModels(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 
 	profile := h.profileManager.GetProfile(profileID)
@@ -58,12 +58,12 @@ func (h *CompositeAdminHandler) ListCompositeModels(c *fiber.Ctx) error {
 
 // UpsertCompositeModel creates or updates a composite model
 // PUT /api/admin/profiles/:profile_id/composite-models/:id
-func (h *CompositeAdminHandler) UpsertCompositeModel(c *fiber.Ctx) error {
+func (h *CompositeAdminHandler) UpsertCompositeModel(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 	modelID := c.Params("id")
 
 	var req model.CompositeAutoModel
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
@@ -114,7 +114,7 @@ func (h *CompositeAdminHandler) UpsertCompositeModel(c *fiber.Ctx) error {
 
 // DeleteCompositeModel deletes a composite model
 // DELETE /api/admin/profiles/:profile_id/composite-models/:id
-func (h *CompositeAdminHandler) DeleteCompositeModel(c *fiber.Ctx) error {
+func (h *CompositeAdminHandler) DeleteCompositeModel(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 	modelID := c.Params("id")
 
@@ -140,7 +140,7 @@ func (h *CompositeAdminHandler) DeleteCompositeModel(c *fiber.Ctx) error {
 
 // GetCompositeModelHealth returns health status for a composite model
 // GET /api/admin/profiles/:profile_id/composite-models/:id/health
-func (h *CompositeAdminHandler) GetCompositeModelHealth(c *fiber.Ctx) error {
+func (h *CompositeAdminHandler) GetCompositeModelHealth(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 	modelID := c.Params("id")
 
@@ -185,7 +185,7 @@ func (h *CompositeAdminHandler) GetCompositeModelHealth(c *fiber.Ctx) error {
 
 // GetCompositeModelMetrics returns metrics for a composite model
 // GET /api/admin/profiles/:profile_id/composite-models/:id/metrics
-func (h *CompositeAdminHandler) GetCompositeModelMetrics(c *fiber.Ctx) error {
+func (h *CompositeAdminHandler) GetCompositeModelMetrics(c fiber.Ctx) error {
 	profileID := c.Params("profile_id")
 	modelID := c.Params("id")
 

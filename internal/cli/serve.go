@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -19,10 +18,10 @@ import (
 	"github.com/gemone/model-router/internal/template"
 	"github.com/gemone/model-router/internal/utils"
 	"github.com/gemone/model-router/internal/web"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/limiter"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/cors"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
+	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -147,7 +146,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	app.Use(middleware.Logger())
 
 	// Security headers middleware
-	app.Use(func(c *fiber.Ctx) error {
+	app.Use(func(c fiber.Ctx) error {
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("X-XSS-Protection", "1; mode=block")
@@ -162,9 +161,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if cfg.CORS.Enabled {
 		origins := cfg.CORS.AllowedOrigins
 		app.Use(cors.New(cors.Config{
-			AllowOrigins:     strings.Join(origins, ","),
-			AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
-			AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS",
+			AllowOrigins:     origins,
+			AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 			AllowCredentials: false,
 			MaxAge:           300,
 		}))
@@ -176,7 +175,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("Warning: failed to load embedded web UI: %v", err)
 		log.Printf("Web UI will not be available, but API endpoints will work normally")
 	} else if wfs != nil {
-		app.Use(func(c *fiber.Ctx) error {
+		app.Use(func(c fiber.Ctx) error {
 			path := c.Path()
 			if len(path) >= 5 && (path[:5] == "/api/" || path[:4] == "/v1/") {
 				return c.Next()
@@ -222,10 +221,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	authLimiter := limiter.New(limiter.Config{
 		Max:        10,
 		Expiration: 1 * 60 * 1000,
-		KeyGenerator: func(c *fiber.Ctx) string {
+		KeyGenerator: func(c fiber.Ctx) string {
 			return c.IP() + ":auth"
 		},
-		LimitReached: func(c *fiber.Ctx) error {
+		LimitReached: func(c fiber.Ctx) error {
 			return c.Status(429).JSON(fiber.Map{
 				"error":   "rate_limit_exceeded",
 				"message": "Too many authentication attempts. Please try again later.",
@@ -241,23 +240,40 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Protected admin endpoints (require authentication, standard rate limiting)
 	compressionAdminHandler := handler.NewCompressionAdminHandler()
-	admin := app.Group("/api/admin",
-		middleware.AdminAuth(),
-		limiter.New(limiter.Config{
-			Max:        100,
-			Expiration: 1 * 60 * 1000,
-			KeyGenerator: func(c *fiber.Ctx) string {
-				return c.IP()
-			},
-			LimitReached: func(c *fiber.Ctx) error {
-				return c.Status(429).JSON(fiber.Map{"error": "rate limit exceeded"})
-			},
-		}),
-	)
+	
+	// Standard rate limiter for most admin endpoints: 300 req/min
+	standardLimiter := limiter.New(limiter.Config{
+		Max:        300,
+		Expiration: 1 * 60 * 1000,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{"error": "rate limit exceeded"})
+		},
+	})
+	
+	// Relaxed rate limiter for test endpoints: 600 req/min
+	testLimiter := limiter.New(limiter.Config{
+		Max:        600,
+		Expiration: 1 * 60 * 1000,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{"error": "rate limit exceeded"})
+		},
+	})
+	
+	// Main admin group with standard limiting (for all other endpoints)
+	admin := app.Group("/api/admin", middleware.AdminAuth(), standardLimiter)
 
-	// Register all admin routes (auth endpoints already registered above)
+	// Register all admin routes
 	adminHandler.RegisterRoutes(admin)
 	compressionAdminHandler.RegisterRoutes(admin)
+	
+	// Test endpoint with relaxed rate limiting (re-register to override)
+	app.Post("/api/admin/test", middleware.AdminAuth(), testLimiter, adminHandler.TestModel)
 
 	// Register rule admin routes
 	ruleAdminHandler := handler.NewRuleAdminHandler()
@@ -307,7 +323,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 }
 
 // customErrorHandler handles errors globally
-func customErrorHandler(c *fiber.Ctx, err error) error {
+func customErrorHandler(c fiber.Ctx, err error) error {
 	code := fiber.StatusInternalServerError
 	if e, ok := err.(*fiber.Error); ok {
 		code = e.Code

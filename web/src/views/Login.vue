@@ -23,7 +23,6 @@
             :prefix-icon="Lock"
             show-password
             :disabled="loading"
-            @keyup.enter="handleLogin"
           />
         </el-form-item>
 
@@ -95,7 +94,7 @@ async function handleLogin() {
     const success = await store.login(loginForm.value.password)
     if (success) {
       ElMessage.success('登录成功')
-      router.push('/dashboard')
+      await router.push('/dashboard')
     } else {
       errorMessage.value = '密码错误，请重试'
     }

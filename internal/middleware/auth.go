@@ -8,12 +8,12 @@ import (
 	"github.com/gemone/model-router/internal/database"
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/utils"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // AdminAuth admin authentication middleware
 func AdminAuth() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		cfg := config.GetConfig()
 
 		// Check if AdminToken is configured
@@ -66,7 +66,7 @@ func ValidateAdminToken(token string) bool {
 // ProfileAuth profile authentication middleware
 // Validates that the Authorization token in the request matches the profile's configured API token
 func ProfileAuth() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		// Get profile name from path parameter
 		profilePath := c.Params("profile")
 		if profilePath == "" {

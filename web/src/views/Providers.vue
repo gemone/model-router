@@ -48,7 +48,7 @@
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item :label="$t('provider.type')" prop="type">
-          <el-select v-model="form.type" style="width: 100%">
+          <el-select v-model="form.type" style="width: 100%" @change="onTypeChange">
             <el-option label="OpenAI" value="openai" />
             <el-option label="Anthropic" value="anthropic" />
             <el-option label="Azure OpenAI" value="azure" />
@@ -140,6 +140,23 @@ const rules = {
   name: [{ required: true, message: t('message.inputRequired'), trigger: 'blur' }],
   type: [{ required: true, message: t('message.selectRequired'), trigger: 'change' }],
   base_url: [{ required: true, message: t('message.inputRequired'), trigger: 'blur' }],
+}
+
+const defaultConfigs = {
+  openai: { base_url: 'https://api.openai.com', chat_path: '/v1/chat/completions' },
+  anthropic: { base_url: 'https://api.anthropic.com', chat_path: '/v1/messages' },
+  azure: { base_url: '', chat_path: '/openai/deployments/{deployment}/chat/completions' },
+  deepseek: { base_url: 'https://api.deepseek.com', chat_path: '/v1/chat/completions' },
+  ollama: { base_url: 'http://localhost:11434', chat_path: '/api/chat' },
+  'openai-compatible': { base_url: '', chat_path: '/v1/chat/completions' },
+}
+
+function onTypeChange(type) {
+  const config = defaultConfigs[type]
+  if (config && !isEdit.value) {
+    form.value.base_url = config.base_url
+    form.value.chat_path = config.chat_path
+  }
 }
 
 function showAddDialog() {

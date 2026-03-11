@@ -13,7 +13,7 @@ import (
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/service"
 	"github.com/gemone/model-router/internal/tokenizer"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
 
@@ -68,21 +68,21 @@ func validateProfilePath(profilePath string) error {
 
 // RegisterRoutes 注册路由
 func (h *APIHandler) RegisterRoutes(app *fiber.App) {
-	// OpenAI 兼容 API
-	app.Post("/api/:profile/v1/chat/completions", h.handleChatCompletion)
-	app.Post("/api/:profile/v1/embeddings", h.handleEmbeddings)
-	app.Get("/api/:profile/v1/models", h.handleListModels)
+	// Claude/Anthropic 格式 - 必须先注册，避免被通用路由匹配
+	app.Post("/api/claude/:profile/v1/messages", h.handleChatCompletionWithFormat)
+	app.Post("/api/anthropic/:profile/v1/messages", h.handleChatCompletionWithFormat)
+	app.Get("/api/claude/:profile/v1/models", h.handleListModels)
+	app.Get("/api/anthropic/:profile/v1/models", h.handleListModels)
 
 	// 递进式格式 /api/{format}/{profile}/...
 	app.Post("/api/openai/:profile/v1/chat/completions", h.handleChatCompletion)
 	app.Post("/api/openai/:profile/v1/embeddings", h.handleEmbeddings)
 	app.Get("/api/openai/:profile/v1/models", h.handleListModels)
 
-	// Claude/Anthropic 格式 - 新路由支持 APIFormat 参数
-	app.Post("/api/claude/:profile/v1/messages", h.handleChatCompletionWithFormat)
-	app.Post("/api/anthropic/:profile/v1/messages", h.handleChatCompletionWithFormat)
-	app.Get("/api/claude/:profile/v1/models", h.handleListModels)
-	app.Get("/api/anthropic/:profile/v1/models", h.handleListModels)
+	// OpenAI 兼容 API - 通用路由放在最后
+	app.Post("/api/:profile/v1/chat/completions", h.handleChatCompletion)
+	app.Post("/api/:profile/v1/embeddings", h.handleEmbeddings)
+	app.Get("/api/:profile/v1/models", h.handleListModels)
 
 	// 简写格式
 	app.Post("/:profile/v1/chat/completions", h.handleChatCompletion)
@@ -96,7 +96,7 @@ func (h *APIHandler) RegisterRoutes(app *fiber.App) {
 }
 
 // handleChatCompletion 处理聊天完成请求
-func (h *APIHandler) handleChatCompletion(c *fiber.Ctx) error {
+func (h *APIHandler) handleChatCompletion(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -105,12 +105,12 @@ func (h *APIHandler) handleChatCompletion(c *fiber.Ctx) error {
 }
 
 // handleDefaultChatCompletion 处理默认 Profile 的聊天完成
-func (h *APIHandler) handleDefaultChatCompletion(c *fiber.Ctx) error {
+func (h *APIHandler) handleDefaultChatCompletion(c fiber.Ctx) error {
 	return h.processChatCompletion(c, "")
 }
 
 // processChatCompletion 处理聊天完成
-func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) error {
+func (h *APIHandler) processChatCompletion(c fiber.Ctx, profilePath string) error {
 	requestID := uuid.New().String()
 	start := time.Now()
 
@@ -122,7 +122,7 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 
 	// 解析请求体
 	var req model.ChatCompletionRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
@@ -168,7 +168,6 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 	var compressionMetadata *model.CompressionMetadata
 	shouldCompress := h.shouldApplyCompression(profile.Profile, routeResult.Model, req.Messages)
 	if shouldCompress {
-		originalCount := len(req.Messages)
 		// Create session for compression (minimal required fields)
 		session := &model.Session{
 			ID:            requestID,
@@ -182,11 +181,6 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 		} else {
 			req.Messages = compressedMessages
 			compressionMetadata = metadata
-			if h.debug {
-				ratio := float64(len(compressedMessages)) / float64(originalCount)
-				fmt.Printf("Compression applied: ratio=%.2f (%d messages processed)\n",
-					ratio, originalCount)
-			}
 		}
 	}
 
@@ -237,7 +231,7 @@ func (h *APIHandler) processChatCompletion(c *fiber.Ctx, profilePath string) err
 }
 
 // handleEmbeddings 处理嵌入请求
-func (h *APIHandler) handleEmbeddings(c *fiber.Ctx) error {
+func (h *APIHandler) handleEmbeddings(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -246,14 +240,14 @@ func (h *APIHandler) handleEmbeddings(c *fiber.Ctx) error {
 }
 
 // handleDefaultEmbeddings 处理默认 Profile 的嵌入
-func (h *APIHandler) handleDefaultEmbeddings(c *fiber.Ctx) error {
+func (h *APIHandler) handleDefaultEmbeddings(c fiber.Ctx) error {
 	return h.processEmbeddings(c, "")
 }
 
 // processEmbeddings 处理嵌入
-func (h *APIHandler) processEmbeddings(c *fiber.Ctx, profilePath string) error {
+func (h *APIHandler) processEmbeddings(c fiber.Ctx, profilePath string) error {
 	var req model.EmbeddingRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
@@ -285,7 +279,7 @@ func (h *APIHandler) processEmbeddings(c *fiber.Ctx, profilePath string) error {
 }
 
 // handleListModels 处理模型列表请求
-func (h *APIHandler) handleListModels(c *fiber.Ctx) error {
+func (h *APIHandler) handleListModels(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -294,12 +288,12 @@ func (h *APIHandler) handleListModels(c *fiber.Ctx) error {
 }
 
 // handleDefaultListModels 处理默认 Profile 的模型列表
-func (h *APIHandler) handleDefaultListModels(c *fiber.Ctx) error {
+func (h *APIHandler) handleDefaultListModels(c fiber.Ctx) error {
 	return h.processListModels(c, "")
 }
 
 // processListModels 处理模型列表
-func (h *APIHandler) processListModels(c *fiber.Ctx, profilePath string) error {
+func (h *APIHandler) processListModels(c fiber.Ctx, profilePath string) error {
 	profile := h.profileManager.GetProfile(profilePath)
 	if profile == nil {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
@@ -325,7 +319,7 @@ func (h *APIHandler) processListModels(c *fiber.Ctx, profilePath string) error {
 
 // handleChatCompletionWithFormat 处理带格式参数的聊天完成请求
 // 支持 /api/claude/:profile/v1/messages 和 /api/anthropic/:profile/v1/messages
-func (h *APIHandler) handleChatCompletionWithFormat(c *fiber.Ctx) error {
+func (h *APIHandler) handleChatCompletionWithFormat(c fiber.Ctx) error {
 	// 从路径中提取格式类型
 	apiFormat := GetAPIFormatFromPath(c.Path())
 	profilePath := c.Params("profile")

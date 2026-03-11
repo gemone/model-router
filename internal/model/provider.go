@@ -10,6 +10,7 @@ type ProviderType string
 const (
 	ProviderOpenAI           ProviderType = "openai"
 	ProviderClaude           ProviderType = "claude"
+	ProviderAnthropic        ProviderType = "anthropic" // 别名，与 ProviderClaude 相同
 	ProviderAzure            ProviderType = "azure"
 	ProviderDeepSeek         ProviderType = "deepseek"
 	ProviderOllama           ProviderType = "ollama"
