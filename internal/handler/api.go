@@ -337,7 +337,7 @@ func (h *APIHandler) handleChatCompletionWithFormat(c fiber.Ctx) error {
 }
 
 // processAnthropicRequest 处理 Anthropic/Claude 格式请求
-func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) error {
+func (h *APIHandler) processAnthropicRequest(c fiber.Ctx, profilePath string) error {
 	requestID := uuid.New().String()
 	start := time.Now()
 
@@ -355,7 +355,7 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 
 	var anthropicReq AnthropicRequest
 	if err := json.Unmarshal(body, &anthropicReq); err != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body", "details": err.Error()})
 	}
 
 	// 转换为 OpenAI 格式
@@ -397,7 +397,6 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 	var compressionMetadata *model.CompressionMetadata
 	shouldCompress := h.shouldApplyCompression(profile.Profile, routeResult.Model, openAIReq.Messages)
 	if shouldCompress {
-		originalCount := len(openAIReq.Messages)
 		session := &model.Session{
 			ID:            requestID,
 			ContextWindow: profile.Profile.MaxContextWindow,
@@ -409,9 +408,6 @@ func (h *APIHandler) processAnthropicRequest(c *fiber.Ctx, profilePath string) e
 		} else {
 			openAIReq.Messages = compressedMessages
 			compressionMetadata = metadata
-			if h.debug {
-				fmt.Printf("Compression applied: %d -> %d messages\n", originalCount, len(compressedMessages))
-			}
 		}
 	}
 

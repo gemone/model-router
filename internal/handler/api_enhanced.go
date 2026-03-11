@@ -9,7 +9,7 @@ import (
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/router"
 	"github.com/gemone/model-router/internal/service"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
 
@@ -73,7 +73,7 @@ func (h *EnhancedAPIHandler) RegisterEnhancedRoutes(app *fiber.App) {
 
 // ==================== 增强版 OpenAI 处理 ====================
 
-func (h *EnhancedAPIHandler) handleEnhancedChatCompletion(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleEnhancedChatCompletion(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -81,11 +81,11 @@ func (h *EnhancedAPIHandler) handleEnhancedChatCompletion(c *fiber.Ctx) error {
 	return h.processEnhancedChatCompletion(c, profilePath)
 }
 
-func (h *EnhancedAPIHandler) handleDefaultEnhancedChatCompletion(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleDefaultEnhancedChatCompletion(c fiber.Ctx) error {
 	return h.processEnhancedChatCompletion(c, "")
 }
 
-func (h *EnhancedAPIHandler) processEnhancedChatCompletion(c *fiber.Ctx, profilePath string) error {
+func (h *EnhancedAPIHandler) processEnhancedChatCompletion(c fiber.Ctx, profilePath string) error {
 	requestID := uuid.New().String()
 	start := time.Now()
 
@@ -97,7 +97,7 @@ func (h *EnhancedAPIHandler) processEnhancedChatCompletion(c *fiber.Ctx, profile
 
 	// 解析请求体
 	var req model.ChatCompletionRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
@@ -147,11 +147,11 @@ func (h *EnhancedAPIHandler) processEnhancedChatCompletion(c *fiber.Ctx, profile
 }
 
 func (h *EnhancedAPIHandler) handleStreamingResponse(
-	c *fiber.Ctx,
+	c fiber.Ctx,
 	routeResult *service.RouteResult,
 	req *model.ChatCompletionRequest,
-	requestID string,
-	start time.Time,
+	_ string,  // requestID - reserved for future logging
+	_ time.Time, // start - reserved for future metrics
 ) error {
 	c.Response().Header.SetContentType("text/event-stream")
 	c.Response().Header.Set("Cache-Control", "no-cache")
@@ -175,8 +175,9 @@ func (h *EnhancedAPIHandler) handleStreamingResponse(
 
 // ==================== Claude/Anthropic 格式处理 ====================
 
-func (h *EnhancedAPIHandler) handleClaudeFormat(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleClaudeFormat(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
+
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -189,8 +190,8 @@ func (h *EnhancedAPIHandler) handleClaudeFormat(c *fiber.Ctx) error {
 
 	// 解析 Anthropic 请求
 	var anthropicReq AnthropicRequest
-	if err := c.BodyParser(&anthropicReq); err != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	if err := c.Bind().Body(&anthropicReq); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body", "details": err.Error()})
 	}
 
 	// 转换为 OpenAI 格式
@@ -227,41 +228,9 @@ func (h *EnhancedAPIHandler) handleClaudeFormat(c *fiber.Ctx) error {
 	return c.JSON(anthropicResp)
 }
 
-func (h *EnhancedAPIHandler) handleClaudeStreaming(
-	c *fiber.Ctx,
-	routeResult *service.RouteResult,
-	req *model.ChatCompletionRequest,
-) error {
-	c.Response().Header.SetContentType("text/event-stream")
-	c.Response().Header.Set("Cache-Control", "no-cache")
-	c.Response().Header.Set("Connection", "keep-alive")
-
-	stream, err := routeResult.Adapter.ChatCompletionStream(c.Context(), req)
-	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	// Claude 格式的流式响应转换
-	for resp := range stream {
-		// 转换为 Claude 格式（简化版）
-		claudeEvent := map[string]interface{}{
-			"type": "content_block_delta",
-			"delta": map[string]interface{}{
-				"type": "text",
-				"text": extractDeltaContent(resp),
-			},
-		}
-		data, _ := json.Marshal(claudeEvent)
-		c.Write([]byte(fmt.Sprintf("event: content_block_delta\ndata: %s\n\n", string(data))))
-	}
-
-	c.Write([]byte("event: message_stop\ndata: {\"type\": \"message_stop\"}\n\n"))
-	return nil
-}
-
 // ==================== Ollama 格式处理 ====================
 
-func (h *EnhancedAPIHandler) handleOllamaChat(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleOllamaChat(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -275,7 +244,7 @@ func (h *EnhancedAPIHandler) handleOllamaChat(c *fiber.Ctx) error {
 
 	// 解析 Ollama 请求
 	var ollamaReq OllamaChatRequest
-	if err := c.BodyParser(&ollamaReq); err != nil {
+	if err := c.Bind().Body(&ollamaReq); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(ollamaError("invalid request body"))
 	}
 
@@ -313,7 +282,7 @@ func (h *EnhancedAPIHandler) handleOllamaChat(c *fiber.Ctx) error {
 	return c.JSON(ollamaResp)
 }
 
-func (h *EnhancedAPIHandler) handleOllamaGenerate(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleOllamaGenerate(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(ollamaError(err.Error()))
@@ -325,7 +294,7 @@ func (h *EnhancedAPIHandler) handleOllamaGenerate(c *fiber.Ctx) error {
 	}
 
 	var ollamaReq OllamaGenerateRequest
-	if err := c.BodyParser(&ollamaReq); err != nil {
+	if err := c.Bind().Body(&ollamaReq); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(ollamaError("invalid request body"))
 	}
 
@@ -361,7 +330,7 @@ func (h *EnhancedAPIHandler) handleOllamaGenerate(c *fiber.Ctx) error {
 }
 
 func (h *EnhancedAPIHandler) handleOllamaStreaming(
-	c *fiber.Ctx,
+	c fiber.Ctx,
 	routeResult *service.RouteResult,
 	req *model.ChatCompletionRequest,
 	modelName string,
@@ -383,7 +352,7 @@ func (h *EnhancedAPIHandler) handleOllamaStreaming(
 	return nil
 }
 
-func (h *EnhancedAPIHandler) handleOllamaListModels(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleOllamaListModels(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(ollamaError(err.Error()))
@@ -400,7 +369,7 @@ func (h *EnhancedAPIHandler) handleOllamaListModels(c *fiber.Ctx) error {
 	return c.JSON(ollamaResp)
 }
 
-func (h *EnhancedAPIHandler) handleOllamaEmbeddings(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleOllamaEmbeddings(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(ollamaError(err.Error()))
@@ -412,7 +381,7 @@ func (h *EnhancedAPIHandler) handleOllamaEmbeddings(c *fiber.Ctx) error {
 	}
 
 	var ollamaReq OllamaEmbeddingRequest
-	if err := c.BodyParser(&ollamaReq); err != nil {
+	if err := c.Bind().Body(&ollamaReq); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(ollamaError("invalid request body"))
 	}
 
@@ -441,13 +410,13 @@ func (h *EnhancedAPIHandler) handleOllamaEmbeddings(c *fiber.Ctx) error {
 	return c.JSON(ollamaResp)
 }
 
-func (h *EnhancedAPIHandler) handleOllamaNotImplemented(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleOllamaNotImplemented(c fiber.Ctx) error {
 	return c.Status(http.StatusNotImplemented).JSON(ollamaError("this endpoint is not implemented"))
 }
 
 // ==================== 辅助函数 ====================
 
-func (h *EnhancedAPIHandler) handleEnhancedEmbeddings(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleEnhancedEmbeddings(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -455,13 +424,13 @@ func (h *EnhancedAPIHandler) handleEnhancedEmbeddings(c *fiber.Ctx) error {
 	return h.processEnhancedEmbeddings(c, profilePath)
 }
 
-func (h *EnhancedAPIHandler) handleDefaultEnhancedEmbeddings(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleDefaultEnhancedEmbeddings(c fiber.Ctx) error {
 	return h.processEnhancedEmbeddings(c, "")
 }
 
-func (h *EnhancedAPIHandler) processEnhancedEmbeddings(c *fiber.Ctx, profilePath string) error {
+func (h *EnhancedAPIHandler) processEnhancedEmbeddings(c fiber.Ctx, profilePath string) error {
 	var req model.EmbeddingRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
@@ -487,7 +456,7 @@ func (h *EnhancedAPIHandler) processEnhancedEmbeddings(c *fiber.Ctx, profilePath
 	return c.JSON(result)
 }
 
-func (h *EnhancedAPIHandler) handleEnhancedListModels(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleEnhancedListModels(c fiber.Ctx) error {
 	profilePath := c.Params("profile")
 	if err := validateProfilePath(profilePath); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -495,11 +464,11 @@ func (h *EnhancedAPIHandler) handleEnhancedListModels(c *fiber.Ctx) error {
 	return h.processEnhancedListModels(c, profilePath)
 }
 
-func (h *EnhancedAPIHandler) handleDefaultEnhancedListModels(c *fiber.Ctx) error {
+func (h *EnhancedAPIHandler) handleDefaultEnhancedListModels(c fiber.Ctx) error {
 	return h.processEnhancedListModels(c, "")
 }
 
-func (h *EnhancedAPIHandler) processEnhancedListModels(c *fiber.Ctx, profilePath string) error {
+func (h *EnhancedAPIHandler) processEnhancedListModels(c fiber.Ctx, profilePath string) error {
 	profile := h.profileManager.GetProfile(profilePath)
 	if profile == nil {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
@@ -542,7 +511,7 @@ func (h *EnhancedAPIHandler) applyRules(profile *service.ProfileInstance, input 
 	return engine.Match(input)
 }
 
-func (h *EnhancedAPIHandler) loadRulesForProfile(profileID string) []model.Rule {
+func (h *EnhancedAPIHandler) loadRulesForProfile(_ string) []model.Rule {
 	// TODO: 从数据库加载规则
 	// 临时返回空规则列表
 	return []model.Rule{}
@@ -570,7 +539,7 @@ func (h *EnhancedAPIHandler) applyRuleActions(req model.ChatCompletionRequest, r
 }
 
 func (h *EnhancedAPIHandler) buildCustomHeaders(
-	profile *service.ProfileInstance,
+	_ *service.ProfileInstance,
 	routeResult *service.RouteResult,
 	ruleResult *model.RuleMatchResult,
 ) map[string]string {
@@ -592,7 +561,7 @@ func (h *EnhancedAPIHandler) buildCustomHeaders(
 
 // ==================== 工具函数 ====================
 
-func buildRuleEngineInput(c *fiber.Ctx, req *model.ChatCompletionRequest) *model.RuleEngineInput {
+func buildRuleEngineInput(c fiber.Ctx, req *model.ChatCompletionRequest) *model.RuleEngineInput {
 	input := model.NewRuleEngineInput()
 
 	// 收集请求头
@@ -631,13 +600,6 @@ func buildRuleEngineInput(c *fiber.Ctx, req *model.ChatCompletionRequest) *model
 	return input
 }
 
-func extractDeltaContent(resp *model.ChatCompletionStreamResponse) string {
-	if len(resp.Choices) > 0 {
-		return resp.Choices[0].Delta.Content
-	}
-	return ""
-}
-
 func ollamaError(message string) fiber.Map {
 	return fiber.Map{"error": message}
 }
@@ -647,16 +609,16 @@ func ollamaError(message string) fiber.Map {
 func convertOllamaChatToOpenAI(req *OllamaChatRequest) *model.ChatCompletionRequest {
 	messages := make([]model.Message, 0, len(req.Messages))
 	for _, msg := range req.Messages {
-		var content interface{}
+		var content any
 		content = msg.Content
 
 		// 如果有图片，需要处理多模态内容
 		if len(msg.Images) > 0 {
-			contentParts := []interface{}{
-				map[string]interface{}{"type": "text", "text": msg.Content},
+			contentParts := []any{
+				map[string]any{"type": "text", "text": msg.Content},
 			}
 			for _, img := range msg.Images {
-				contentParts = append(contentParts, map[string]interface{}{
+				contentParts = append(contentParts, map[string]any{
 					"type": "image_url",
 					"image_url": map[string]string{
 						"url": fmt.Sprintf("data:image/jpeg;base64,%s", img),
