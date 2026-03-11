@@ -17,6 +17,7 @@ import (
 
 func init() {
 	adapter.Register(model.ProviderClaude, NewClaudeAdapter)
+	adapter.Register(model.ProviderAnthropic, NewClaudeAdapter) // 注册 anthropic 别名
 }
 
 // ClaudeAdapter Claude适配器
@@ -41,9 +42,12 @@ func (c *ClaudeAdapter) Type() model.ProviderType {
 
 // GetRequestHeaders 获取请求头
 func (c *ClaudeAdapter) GetRequestHeaders() map[string]string {
+	// 安全地获取 API Key
+	apiKey := c.GetAPIKey()
+	
 	return map[string]string{
 		"Content-Type":      "application/json",
-		"x-api-key":         c.BaseAdapter.GetRequestHeaders()["Authorization"][7:], // 去掉 "Bearer " 前缀
+		"x-api-key":         apiKey,
 		"anthropic-version": "2023-06-01",
 	}
 }
@@ -86,8 +90,12 @@ func (c *ClaudeAdapter) ChatCompletionStream(ctx context.Context, req *model.Cha
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("API error (status %d)", resp.StatusCode)
+		if err != nil {
+			return nil, fmt.Errorf("API error (status %d): failed to read error response: %w", resp.StatusCode, err)
+		}
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	ch := make(chan *model.ChatCompletionStreamResponse)
@@ -246,7 +254,7 @@ func (c *ClaudeAdapter) convertRequest(req *model.ChatCompletionRequest) *claude
 
 		claudeMsg := claudeMessage{
 			Role:    msg.Role,
-			Content: msg.Content,
+			Content: convertContentToClaudeFormat(msg.Content),
 		}
 
 		// 转换工具调用
@@ -280,6 +288,11 @@ func (c *ClaudeAdapter) convertRequest(req *model.ChatCompletionRequest) *claude
 				InputSchema: schema,
 			})
 		}
+	}
+	
+	// 转换 tool_choice
+	if req.ToolChoice != nil {
+		claudeReq.ToolChoice = convertToolChoiceToClaudeFormat(req.ToolChoice)
 	}
 
 	return claudeReq
@@ -337,56 +350,67 @@ func (c *ClaudeAdapter) convertResponse(resp *claudeResponse, modelName string) 
 }
 
 func (c *ClaudeAdapter) convertStreamResponse(resp *claudeStreamResponse, modelName string) *model.ChatCompletionStreamResponse {
-	if resp.Type == "message_start" {
-		return &model.ChatCompletionStreamResponse{
-			ID:      fmt.Sprintf("chatcmpl-%s", resp.Message.ID),
-			Object:  "chat.completion.chunk",
-			Created: time.Now().Unix(),
-			Model:   modelName,
-			Choices: []model.ChatCompletionStreamChoice{
-				{
-					Index: 0,
-					Delta: model.Delta{
-						Role: "assistant",
+	switch resp.Type {
+	case "message_start":
+		if resp.Message != nil {
+			return &model.ChatCompletionStreamResponse{
+				ID:      fmt.Sprintf("chatcmpl-%s", resp.Message.ID),
+				Object:  "chat.completion.chunk",
+				Created: time.Now().Unix(),
+				Model:   modelName,
+				Choices: []model.ChatCompletionStreamChoice{
+					{
+						Index: 0,
+						Delta: model.Delta{
+							Role: "assistant",
+						},
 					},
 				},
-			},
+			}
 		}
-	}
 
-	if resp.Type == "content_block_delta" && resp.Delta != nil {
-		return &model.ChatCompletionStreamResponse{
-			Object:  "chat.completion.chunk",
-			Created: time.Now().Unix(),
-			Model:   modelName,
-			Choices: []model.ChatCompletionStreamChoice{
-				{
-					Index: 0,
-					Delta: model.Delta{
-						Content: resp.Delta.Text,
+	case "content_block_delta":
+		if resp.Delta != nil {
+			return &model.ChatCompletionStreamResponse{
+				Object:  "chat.completion.chunk",
+				Created: time.Now().Unix(),
+				Model:   modelName,
+				Choices: []model.ChatCompletionStreamChoice{
+					{
+						Index: 0,
+						Delta: model.Delta{
+							Content: resp.Delta.Text,
+						},
 					},
 				},
-			},
+			}
 		}
-	}
 
-	if resp.Type == "message_delta" && resp.Delta != nil && resp.Delta.StopReason != "" {
-		finishReason := "stop"
-		if resp.Delta.StopReason == "max_tokens" {
-			finishReason = "length"
-		}
-		return &model.ChatCompletionStreamResponse{
-			Object:  "chat.completion.chunk",
-			Created: time.Now().Unix(),
-			Model:   modelName,
-			Choices: []model.ChatCompletionStreamChoice{
-				{
-					Index:        0,
-					Delta:        model.Delta{},
-					FinishReason: &finishReason,
+	case "message_delta":
+		if resp.Delta != nil && resp.Delta.StopReason != "" {
+			finishReason := "stop"
+			if resp.Delta.StopReason == "max_tokens" {
+				finishReason = "length"
+			} else if resp.Delta.StopReason == "tool_use" {
+				finishReason = "tool_calls"
+			}
+			return &model.ChatCompletionStreamResponse{
+				Object:  "chat.completion.chunk",
+				Created: time.Now().Unix(),
+				Model:   modelName,
+				Choices: []model.ChatCompletionStreamChoice{
+					{
+						Index:        0,
+						Delta:        model.Delta{},
+						FinishReason: &finishReason,
+					},
 				},
-			},
+			}
 		}
+
+	case "message_stop":
+		// message_stop 表示流结束，返回 nil
+		return nil
 	}
 
 	return nil
@@ -418,4 +442,98 @@ func (c *ClaudeAdapter) ConvertStreamResponse(data []byte) (*model.ChatCompletio
 // Embeddings Claude不支持Embeddings
 func (c *ClaudeAdapter) Embeddings(ctx context.Context, req *model.EmbeddingRequest) (*model.EmbeddingResponse, error) {
 	return nil, fmt.Errorf("Claude does not support embeddings")
+}
+
+// convertContentToClaudeFormat 将 OpenAI 格式的内容转换为 Claude 格式
+// OpenAI 支持 string 或 []ContentPart，Claude 支持 string 或 []contentBlock
+func convertContentToClaudeFormat(content interface{}) interface{} {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []model.ContentPart:
+		// 转换多模态内容
+		blocks := make([]contentBlock, 0, len(v))
+		for _, part := range v {
+			switch part.Type {
+			case "text":
+				blocks = append(blocks, contentBlock{
+					Type: "text",
+					Text: part.Text,
+				})
+			case "image_url":
+				// Claude 使用 source 格式处理图片
+				blocks = append(blocks, contentBlock{
+					Type: "image",
+					URL:  part.ImageURL.URL,
+				})
+			}
+		}
+		return blocks
+	case []interface{}:
+		// 处理 JSON 解码后的数组
+		blocks := make([]contentBlock, 0, len(v))
+		for _, item := range v {
+			if itemMap, ok := item.(map[string]interface{}); ok {
+				itemType, _ := itemMap["type"].(string)
+				switch itemType {
+				case "text":
+					if text, ok := itemMap["text"].(string); ok {
+						blocks = append(blocks, contentBlock{
+							Type: "text",
+							Text: text,
+						})
+					}
+				case "image_url":
+					if imageURL, ok := itemMap["image_url"].(map[string]interface{}); ok {
+						if url, ok := imageURL["url"].(string); ok {
+							blocks = append(blocks, contentBlock{
+								Type: "image",
+								URL:  url,
+							})
+						}
+					}
+				}
+			}
+		}
+		if len(blocks) > 0 {
+			return blocks
+		}
+		return v
+	default:
+		return v
+	}
+}
+
+// convertToolChoiceToClaudeFormat 将 OpenAI 的 tool_choice 转换为 Claude 格式
+// OpenAI: "none", "auto", "required", 或 {type: "function", function: {name: "xxx"}}
+// Claude: "auto", "any", "none", 或 {type: "tool", name: "xxx"}
+func convertToolChoiceToClaudeFormat(toolChoice interface{}) interface{} {
+	switch v := toolChoice.(type) {
+	case string:
+		switch v {
+		case "none":
+			return "none"
+		case "auto":
+			return "auto"
+		case "required":
+			return "any" // Claude 使用 "any" 表示必须使用工具
+		default:
+			return "auto"
+		}
+	case map[string]interface{}:
+		// 特定工具选择 {type: "function", function: {name: "xxx"}}
+		if v["type"] == "function" {
+			if fn, ok := v["function"].(map[string]interface{}); ok {
+				if name, ok := fn["name"].(string); ok {
+					return map[string]interface{}{
+						"type": "tool",
+						"name": name,
+					}
+				}
+			}
+		}
+		return "auto"
+	default:
+		return "auto"
+	}
 }
