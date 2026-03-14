@@ -3,9 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
+	"github.com/gemone/model-router/internal/database"
 	"github.com/gemone/model-router/internal/model"
 	"github.com/gemone/model-router/internal/router"
 	"github.com/gemone/model-router/internal/service"
@@ -511,10 +513,14 @@ func (h *EnhancedAPIHandler) applyRules(profile *service.ProfileInstance, input 
 	return engine.Match(input)
 }
 
-func (h *EnhancedAPIHandler) loadRulesForProfile(_ string) []model.Rule {
-	// TODO: 从数据库加载规则
-	// 临时返回空规则列表
-	return []model.Rule{}
+func (h *EnhancedAPIHandler) loadRulesForProfile(profileID string) []model.Rule {
+	db := database.GetDB()
+	var rules []model.Rule
+	if err := db.Where("profile_id = ? AND enabled = ?", profileID, true).Order("priority desc").Find(&rules).Error; err != nil {
+		log.Printf("ERROR: Failed to load rules for profile %s: %v", profileID, err)
+		return []model.Rule{}
+	}
+	return rules
 }
 
 func (h *EnhancedAPIHandler) applyRuleActions(req model.ChatCompletionRequest, result *model.RuleMatchResult) model.ChatCompletionRequest {
@@ -533,6 +539,13 @@ func (h *EnhancedAPIHandler) applyRuleActions(req model.ChatCompletionRequest, r
 	case model.ActionTypeModifyBody:
 		// 修改请求体参数
 		// 这里可以添加 temperature, max_tokens 等参数的修改
+	case model.ActionTypeAddHeader:
+		// 添加请求头 - 在 buildCustomHeaders 中处理
+	case model.ActionTypeSetHeader:
+		// 设置请求头 - 在 buildCustomHeaders 中处理
+	case model.ActionTypeAddParam:
+		// 添加查询参数 - 需要在请求转发时处理
+		// 参数存储在 action.Target (key) 和 action.Value (value) 中
 	}
 
 	return req
@@ -586,6 +599,10 @@ func buildRuleEngineInput(c fiber.Ctx, req *model.ChatCompletionRequest) *model.
 
 	// 解析请求体参数
 	body := make(map[string]interface{})
+	// 添加 model 字段到 body，用于 body_param 规则匹配
+	if req.Model != "" {
+		body["model"] = req.Model
+	}
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature
 	}
@@ -596,6 +613,13 @@ func buildRuleEngineInput(c fiber.Ctx, req *model.ChatCompletionRequest) *model.
 		body["top_p"] = *req.TopP
 	}
 	input.WithBody(body)
+
+	// 解析查询参数
+	queryParams := make(map[string]string)
+	c.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
+		queryParams[string(key)] = string(value)
+	})
+	input.QueryParams = queryParams
 
 	return input
 }

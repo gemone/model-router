@@ -167,10 +167,12 @@
           <el-row :gutter="10">
             <el-col :span="6">
               <el-select v-model="condition.type" :placeholder="$t('rule.conditionType') || '条件类型'">
-                <el-option label="Header" value="header" />
-                <el-option label="Content" value="content" />
-                <el-option label="Time" value="time" />
-                <el-option label="Model" value="model" />
+                <el-option :label="$t('rule.conditionHeader') || 'Header'" value="header" />
+                <el-option :label="$t('rule.conditionBodyParam') || 'Body 参数'" value="body_param" />
+                <el-option :label="$t('rule.conditionQuery') || 'Query 参数'" value="query" />
+                <el-option :label="$t('rule.conditionContent') || 'Content'" value="content" />
+                <el-option :label="$t('rule.conditionTime') || 'Time'" value="time" />
+                <el-option :label="$t('rule.conditionModel') || 'Model'" value="model" />
               </el-select>
             </el-col>
             <el-col :span="5">
@@ -187,14 +189,15 @@
               <el-select v-model="condition.op" :placeholder="$t('rule.operator') || '操作符'">
                 <el-option label="=" value="eq" />
                 <el-option label="!=" value="neq" />
-                <el-option label="包含" value="contains" />
-                <el-option label="正则" value="regex" />
+                <el-option :label="$t('rule.opContains') || '包含'" value="contains" />
+                <el-option :label="$t('rule.opRegex') || '正则'" value="regex" />
                 <el-option label=">" value="gt" />
                 <el-option label="<" value="lt" />
                 <el-option label=">=" value="gte" />
                 <el-option label="<=" value="lte" />
-                <el-option label="范围" value="between" />
-                <el-option label="在列表中" value="in" />
+                <el-option :label="$t('rule.opBetween') || '范围'" value="between" />
+                <el-option :label="$t('rule.opIn') || '在列表中'" value="in" />
+                <el-option :label="$t('rule.opNotIn') || '不在列表中'" value="not_in" />
               </el-select>
             </el-col>
             <el-col :span="7">
@@ -223,6 +226,7 @@
             <el-option :label="$t('rule.actionAddHeader') || '添加请求头'" value="add_header" />
             <el-option :label="$t('rule.actionSetHeader') || '设置请求头'" value="set_header" />
             <el-option :label="$t('rule.actionModifyBody') || '修改请求体'" value="modify_body" />
+            <el-option :label="$t('rule.actionAddParam') || '添加查询参数'" value="add_param" />
           </el-select>
         </el-form-item>
 
@@ -340,6 +344,16 @@ function getFieldOptions(type) {
       { label: 'Content-Type', value: 'Content-Type' },
       { label: t('rule.custom') || '自定义', value: 'custom' }
     ],
+    body_param: [
+      { label: t('rule.modelName') || '模型名称', value: 'model' },
+      { label: t('rule.temperature') || '温度', value: 'temperature' },
+      { label: t('rule.maxTokens') || '最大令牌数', value: 'max_tokens' },
+      { label: t('rule.topP') || 'Top P', value: 'top_p' },
+      { label: t('rule.custom') || '自定义', value: 'custom' }
+    ],
+    query: [
+      { label: t('rule.custom') || '自定义', value: 'custom' }
+    ],
     content: [
       { label: t('rule.hasImage') || '包含图片', value: 'has_image' },
       { label: t('rule.imageCount') || '图片数量', value: 'image_count' },
@@ -364,6 +378,8 @@ function getFieldOptions(type) {
 function getConditionTypeTag(type) {
   const tags = {
     header: 'primary',
+    body_param: 'danger',
+    query: 'warning',
     content: 'success',
     time: 'warning',
     model: 'info'
@@ -375,6 +391,8 @@ function getConditionTypeTag(type) {
 function getConditionTypeLabel(type) {
   const labels = {
     header: 'Header',
+    body_param: 'Body',
+    query: 'Query',
     content: 'Content',
     time: 'Time',
     model: 'Model'
@@ -407,7 +425,8 @@ function getActionTypeTag(type) {
     model: 'success',
     add_header: 'warning',
     set_header: 'warning',
-    modify_body: 'info'
+    modify_body: 'info',
+    add_param: 'danger'
   }
   return tags[type] || ''
 }
@@ -419,7 +438,8 @@ function getActionTypeLabel(type) {
     model: t('rule.actionModel') || '使用模型',
     add_header: t('rule.actionAddHeader') || '添加请求头',
     set_header: t('rule.actionSetHeader') || '设置请求头',
-    modify_body: t('rule.actionModifyBody') || '修改请求体'
+    modify_body: t('rule.actionModifyBody') || '修改请求体',
+    add_param: t('rule.actionAddParam') || '添加查询参数'
   }
   return labels[type] || type
 }

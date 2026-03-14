@@ -240,6 +240,7 @@ import VChart from "vue-echarts";
 import { ElMessage } from "element-plus";
 
 import { useAppStore } from "@/stores/app";
+import { Download, Refresh } from "@element-plus/icons-vue";
 
 use([
     CanvasRenderer,
