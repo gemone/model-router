@@ -476,6 +476,25 @@ func (pm *ProfileManager) UpdateProfile(p *model.Profile) error {
 	// 更新内存中的数据 - 如果存在就更新，不存在就重新加载
 	if instance, ok := pm.profiles[newPath]; ok {
 		instance.Profile = p
+
+		// 重新加载数据（ModelIDs 可能已变更）
+		instance.Lock()
+		instance.adapters = make(map[string]adapter.Adapter)
+		instance.providerMap = make(map[string]*model.Provider)
+		instance.modelMap = make(map[string][]*model.Model)
+		instance.compositeModels = make(map[string]*model.CompositeAutoModel)
+		if instance.compositeService != nil {
+			instance.compositeService.Close()
+			instance.compositeService = nil
+		}
+		instance.Unlock()
+
+		if err := instance.loadData(); err != nil {
+			// Note: Profile update was saved to DB but runtime state may be inconsistent.
+			// The profile will be fully reloaded on next server restart.
+			return fmt.Errorf("failed to reload profile data after update (profile saved to DB but runtime may be inconsistent): %w", err)
+		}
+
 		// Re-initialize compression pipeline with new settings
 		instance.initCompression()
 	} else {

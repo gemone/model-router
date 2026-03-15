@@ -34,9 +34,9 @@ type CompressionConfig struct {
 // DefaultConfig returns the default compression configuration
 func DefaultConfig() *CompressionConfig {
 	return &CompressionConfig{
-		EnableCompression:      false,
-		DefaultStrategy:        "sliding_window",
-		DefaultThreshold:       8000,
+		EnableCompression:       true,
+		DefaultStrategy:         "sliding_window",
+		DefaultThreshold:        8000,
 		DefaultMaxContextWindow: 16000,
 	}
 }
