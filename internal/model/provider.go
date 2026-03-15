@@ -14,7 +14,7 @@ const (
 	ProviderAzure            ProviderType = "azure"
 	ProviderDeepSeek         ProviderType = "deepseek"
 	ProviderOllama           ProviderType = "ollama"
-	ProviderOpenAICompatible ProviderType = "openai-compatible"
+	ProviderOpenAICompatible ProviderType = "openai_compatible"
 )
 
 // Provider 定义模型供应商配置

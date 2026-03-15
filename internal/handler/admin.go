@@ -189,18 +189,20 @@ func (h *AdminHandler) UpdateProfile(c fiber.Ctx) error {
 
 	// Parse only the fields we want to update
 	var updates struct {
-		Name                *string  `json:"name"`
-		Path                *string  `json:"path"`
-		Description         *string  `json:"description"`
-		Enabled             *bool    `json:"enabled"`
-		Priority            *int     `json:"priority"`
-		EnableCompression   *bool    `json:"enable_compression"`
-		CompressionStrategy *string  `json:"compression_strategy"`
-		MaxContextWindow    *int     `json:"max_context_window"`
-		ModelIDs            []string `json:"model_ids"`
-		FallbackModels      []string `json:"fallback_models"`
-		RouteIDs            []string `json:"route_ids"`
-		APIToken            *string  `json:"api_token"` // API Token update field
+		Name                 *string  `json:"name"`
+		Path                 *string  `json:"path"`
+		Description          *string  `json:"description"`
+		Enabled              *bool    `json:"enabled"`
+		Priority             *int     `json:"priority"`
+		EnableCompression    *bool    `json:"enable_compression"`
+		CompressionStrategy  *string  `json:"compression_strategy"`
+		CompressionLevel     *string  `json:"compression_level"`
+		CompressionThreshold *int     `json:"compression_threshold"`
+		MaxContextWindow     *int     `json:"max_context_window"`
+		ModelIDs             []string `json:"model_ids"`
+		FallbackModels       []string `json:"fallback_models"`
+		RouteIDs             []string `json:"route_ids"`
+		APIToken             *string  `json:"api_token"` // API Token update field
 	}
 	if err := c.Bind().Body(&updates); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -224,6 +226,12 @@ func (h *AdminHandler) UpdateProfile(c fiber.Ctx) error {
 	}
 	if updates.CompressionStrategy != nil {
 		existingProfile.CompressionStrategy = *updates.CompressionStrategy
+	}
+	if updates.CompressionLevel != nil {
+		existingProfile.CompressionLevel = *updates.CompressionLevel
+	}
+	if updates.CompressionThreshold != nil {
+		existingProfile.CompressionThreshold = *updates.CompressionThreshold
 	}
 	if updates.MaxContextWindow != nil {
 		existingProfile.MaxContextWindow = *updates.MaxContextWindow
@@ -318,6 +326,14 @@ func (h *AdminHandler) CreateProvider(c fiber.Ctx) error {
 
 	provider := req.Provider
 	provider.ID = uuid.New().String()
+
+	// Generate IDs for nested models
+	for i := range provider.Models {
+		if provider.Models[i].ID == "" {
+			provider.Models[i].ID = uuid.New().String()
+		}
+		provider.Models[i].ProviderID = provider.ID
+	}
 
 	// Encrypt API key
 	if req.APIKey != "" {
@@ -967,7 +983,7 @@ func (h *AdminHandler) DetectModelCapabilities(c fiber.Ctx) error {
 // detectFunctionCapability detects if a model supports function calling
 func detectFunctionCapability(providerType, modelName string) bool {
 	// OpenAI models
-	if providerType == "openai" || providerType == "azure" || providerType == "openai-compatible" {
+	if providerType == "openai" || providerType == "azure" || providerType == "openai_compatible" || providerType == "openai-compatible" {
 		// GPT-4 series supports function calling
 		if contains(modelName, "gpt-4") || contains(modelName, "gpt-3.5-turbo") || contains(modelName, "gpt-4o") {
 			return true
@@ -996,7 +1012,7 @@ func detectFunctionCapability(providerType, modelName string) bool {
 // detectVisionCapability detects if a model supports vision
 func detectVisionCapability(providerType, modelName string) bool {
 	// OpenAI models - versions with vision or v
-	if providerType == "openai" || providerType == "azure" || providerType == "openai-compatible" {
+	if providerType == "openai" || providerType == "azure" || providerType == "openai_compatible" || providerType == "openai-compatible" {
 		if contains(modelName, "vision") || contains(modelName, "-4o") || contains(modelName, "-4-turbo") {
 			return true
 		}
