@@ -1,15 +1,6 @@
 <template>
   <div class="rules-page">
-    <!-- 面包屑导航 -->
-    <div class="breadcrumb-wrapper">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/' }">Home</el-breadcrumb-item>
-        <el-breadcrumb-item>{{ $t('rule.title') || '路由规则' }}</el-breadcrumb-item>
-      </el-breadcrumb>
-    </div>
-
     <div class="page-header">
-      <h2>{{ $t('rule.title') || '路由规则' }}</h2>
       <el-button type="primary" @click="showAddDialog">
         <el-icon><Plus /></el-icon>
         {{ $t('rule.addRule') || '添加规则' }}
@@ -293,6 +284,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -611,10 +603,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.breadcrumb-wrapper {
-  margin-bottom: 16px;
-}
-
 .page-header {
   display: flex;
   justify-content: space-between;

@@ -1,15 +1,6 @@
 <template>
   <div class="logs">
-    <!-- 面包屑导航 -->
-    <div class="breadcrumb-wrapper">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/' }">Home</el-breadcrumb-item>
-        <el-breadcrumb-item>{{ $t("logs.title") }}</el-breadcrumb-item>
-      </el-breadcrumb>
-    </div>
-
     <div class="page-header">
-      <h2>{{ $t('logs.title') }}</h2>
       <div class="header-actions">
         <el-button @click="exportLogs">
           <el-icon><Download /></el-icon>
@@ -175,6 +166,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
+
 const { t } = useI18n()
 const store = useAppStore()
 
@@ -299,10 +291,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.breadcrumb-wrapper {
-  margin-bottom: 16px;
-}
-
 .page-header {
   display: flex;
   justify-content: space-between;

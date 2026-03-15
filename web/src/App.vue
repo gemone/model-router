@@ -20,7 +20,7 @@
             <el-icon>
               <component :is="route.meta.icon" />
             </el-icon>
-            <template #title>{{ $t(`nav.${route.name.toLowerCase()}`) }}</template>
+            <template #title>{{ $t(route.meta?.titleKey) }}</template>
           </el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
@@ -109,7 +109,7 @@ const isLogin = computed(() => route.path === '/login')
 
 const activeMenu = computed(() => route.path)
 
-const routes = router.getRoutes().filter(r => r.meta?.title)
+const routes = router.getRoutes().filter(r => r.meta?.titleKey)
 
 const currentLanguage = ref(locale.value)
 const currentLanguageLabel = computed(() => {

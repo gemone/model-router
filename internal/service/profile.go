@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
@@ -18,6 +19,13 @@ import (
 	"github.com/gemone/model-router/internal/repository"
 	compressionservice "github.com/gemone/model-router/internal/service/compression"
 )
+
+// ruleTargetModel 规则目标模型（内部使用）
+type ruleTargetModel struct {
+	model    *model.Model
+	weight   int
+	priority int
+}
 
 // ProfileInstance Profile 实例
 type ProfileInstance struct {
@@ -735,6 +743,221 @@ func (pi *ProfileInstance) routeViaRoutes(ctx context.Context, modelName string)
 	}
 
 	return nil, fmt.Errorf("model %s not found in any route", modelName)
+}
+
+// RouteByRouteID 根据路由 ID 从路由中选择模型（使用负载均衡策略）
+// 用于规则动作类型为 route 的场景
+func (pi *ProfileInstance) RouteByRouteID(ctx context.Context, routeID string) (*RouteResult, string, error) {
+	pi.RLock()
+	defer pi.RUnlock()
+
+	// 1. 检查 profile 是否有这个路由
+	routeInstance, ok := pi.routeMap[routeID]
+	if !ok {
+		return nil, "", fmt.Errorf("route %s not found in profile: %s", routeID, pi.Profile.Path)
+	}
+
+	// 2. 使用路由服务从路由中选择模型（带负载均衡）
+	routeService := GetRouteService()
+	selectedEntry, err := routeService.SelectModelFromRouteInstance(ctx, routeInstance)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to select model from route %s: %w", routeID, err)
+	}
+
+	if selectedEntry == nil || selectedEntry.Model == nil {
+		return nil, "", fmt.Errorf("no available model in route: %s", routeID)
+	}
+
+	// 3. 获取 provider 和 adapter
+	provider, adapter := pi.getProviderAndAdapter(selectedEntry.Model.ProviderID)
+	if provider == nil || adapter == nil || !provider.Enabled {
+		return nil, "", fmt.Errorf("provider not available for model: %s", selectedEntry.Model.Name)
+	}
+
+	return &RouteResult{
+		Adapter:      adapter,
+		Model:        selectedEntry.Model,
+		Provider:     provider,
+		Profile:      pi.Profile,
+		FallbackUsed: false,
+	}, selectedEntry.Model.Name, nil
+}
+
+// RouteByRuleTargets 根据规则的目标列表选择模型（支持负载均衡）
+// 用于规则动作类型为 models 的场景
+func (pi *ProfileInstance) RouteByRuleTargets(ctx context.Context, targets []model.RuleTarget, strategy string) (*RouteResult, string, error) {
+	pi.RLock()
+	defer pi.RUnlock()
+
+	if len(targets) == 0 {
+		return nil, "", fmt.Errorf("no targets specified")
+	}
+
+	// 加载目标模型
+	var models []ruleTargetModel
+
+	for _, t := range targets {
+		if !t.Enabled {
+			continue
+		}
+		// 从 modelMap 中查找模型
+		if mList, ok := pi.modelMap[t.ModelID]; ok && len(mList) > 0 {
+			// 选择第一个可用的模型实例
+			for _, m := range mList {
+				if m.Enabled {
+					models = append(models, ruleTargetModel{
+						model:    m,
+						weight:   t.Weight,
+						priority: t.Priority,
+					})
+					break
+				}
+			}
+		}
+	}
+
+	if len(models) == 0 {
+		return nil, "", fmt.Errorf("no available models found in targets")
+	}
+
+	// 根据策略选择模型
+	var selected *model.Model
+	switch strategy {
+	case "priority":
+		selected = pi.selectByPriorityFromTargets(models)
+	case "weighted":
+		selected = pi.selectByWeightFromTargets(models)
+	case "random":
+		selected = pi.selectByRandomFromTargets(models)
+	case "auto", "":
+		selected = pi.selectByAutoFromTargets(ctx, models)
+	default:
+		selected = pi.selectByAutoFromTargets(ctx, models)
+	}
+
+	if selected == nil {
+		return nil, "", fmt.Errorf("no model selected")
+	}
+
+	// 获取 provider 和 adapter
+	provider, adapter := pi.getProviderAndAdapter(selected.ProviderID)
+	if provider == nil || adapter == nil || !provider.Enabled {
+		return nil, "", fmt.Errorf("provider not available for model: %s", selected.Name)
+	}
+
+	return &RouteResult{
+		Adapter:      adapter,
+		Model:        selected,
+		Provider:     provider,
+		Profile:      pi.Profile,
+		FallbackUsed: false,
+	}, selected.Name, nil
+}
+
+// selectByPriorityFromTargets 按优先级选择模型（考虑健康度）
+func (pi *ProfileInstance) selectByPriorityFromTargets(models []ruleTargetModel) *model.Model {
+	var best *model.Model
+	highestPriority := -1
+	healthThreshold := 0.5 // 与 RouteService 保持一致的健康阈值
+
+	// 首先尝试从健康的模型中选择
+	for _, tm := range models {
+		healthScore := pi.stats.GetHealthScore(tm.model.ProviderID, tm.model.Name)
+		if healthScore < healthThreshold {
+			continue // 跳过不健康的模型
+		}
+		if tm.priority > highestPriority {
+			highestPriority = tm.priority
+			best = tm.model
+		}
+	}
+
+	// 如果没有健康的模型，降级选择优先级最高的
+	if best == nil && len(models) > 0 {
+		for _, tm := range models {
+			if tm.priority > highestPriority {
+				highestPriority = tm.priority
+				best = tm.model
+			}
+		}
+	}
+	return best
+}
+
+// selectByWeightFromTargets 按权重随机选择
+func (pi *ProfileInstance) selectByWeightFromTargets(models []ruleTargetModel) *model.Model {
+	totalWeight := 0
+	for _, tm := range models {
+		totalWeight += tm.weight
+	}
+
+	if totalWeight <= 0 {
+		return models[0].model
+	}
+
+	target := rand.Intn(totalWeight)
+	cumulative := 0
+	for _, tm := range models {
+		cumulative += tm.weight
+		if target < cumulative {
+			return tm.model
+		}
+	}
+	return models[0].model
+}
+
+// selectByRandomFromTargets 随机选择
+func (pi *ProfileInstance) selectByRandomFromTargets(models []ruleTargetModel) *model.Model {
+	return models[rand.Intn(len(models))].model
+}
+
+// selectByAutoFromTargets 自动选择（综合评分）
+func (pi *ProfileInstance) selectByAutoFromTargets(ctx context.Context, models []ruleTargetModel) *model.Model {
+	type scoredModel struct {
+		model *model.Model
+		score float64
+	}
+	var scored []scoredModel
+
+	for _, tm := range models {
+		score := 0.0
+		// 健康度 (40%)
+		healthScore := pi.stats.GetHealthScore(tm.model.ProviderID, tm.model.Name)
+		score += healthScore * 0.4
+
+		// 优先级 (30%)
+		priorityScore := float64(tm.priority) * 10
+		if priorityScore > 100 {
+			priorityScore = 100
+		}
+		score += priorityScore * 0.3
+
+		// 延迟 (20%)
+		avgLatency := pi.stats.GetAvgLatency(tm.model.ProviderID, tm.model.Name, time.Minute)
+		latencyScore := 100.0
+		if avgLatency > 0 {
+			latencyScore = max(0, 100-avgLatency/50.0)
+		}
+		score += latencyScore * 0.2
+
+		// 权重 (10%)
+		weightScore := float64(tm.weight)
+		if weightScore > 100 {
+			weightScore = 100
+		}
+		score += weightScore * 0.1
+
+		scored = append(scored, scoredModel{model: tm.model, score: score})
+	}
+
+	// 选择得分最高的
+	best := scored[0]
+	for _, s := range scored[1:] {
+		if s.score > best.score {
+			best = s
+		}
+	}
+	return best.model
 }
 
 // RouteWithFallback 带降级策略的路由

@@ -1,19 +1,6 @@
 <template>
     <div class="profiles-page">
-        <!-- 面包屑导航 -->
-        <div class="breadcrumb-wrapper">
-            <el-breadcrumb separator="/">
-                <el-breadcrumb-item :to="{ path: '/' }"
-                    >Home</el-breadcrumb-item
-                >
-                <el-breadcrumb-item>{{
-                    $t("profile.title")
-                }}</el-breadcrumb-item>
-            </el-breadcrumb>
-        </div>
-
         <div class="page-header">
-            <h2>{{ $t("profile.title") }}</h2>
             <el-button type="primary" class="add-btn" @click="showAddDialog">
                 <el-icon><Plus /></el-icon>
                 {{ $t("profile.addProfile") }}
@@ -405,6 +392,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
 
+
 const { t } = useI18n();
 const store = useAppStore();
 const profiles = computed(() => store.profiles);
@@ -533,10 +521,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.breadcrumb-wrapper {
-    margin-bottom: 16px;
-}
-
 .profiles-page {
     max-width: 1400px;
 }

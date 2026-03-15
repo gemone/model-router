@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -108,9 +109,14 @@ func (h *EnhancedAPIHandler) processEnhancedChatCompletion(c fiber.Ctx, profileP
 
 	// 应用规则（如果 Profile 启用了规则）
 	ruleResult := h.applyRules(profile, ruleInput)
+	var routeResult *service.RouteResult
 	if ruleResult.Matched {
 		// 应用规则动作
-		req = h.applyRuleActions(req, ruleResult)
+		var err error
+		req, routeResult, err = h.applyRuleActions(c.Context(), profile, req, ruleResult)
+		if err != nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+		}
 
 		// 添加规则相关的请求头
 		for k, v := range ruleResult.Headers {
@@ -118,10 +124,13 @@ func (h *EnhancedAPIHandler) processEnhancedChatCompletion(c fiber.Ctx, profileP
 		}
 	}
 
-	// 路由到目标模型
-	routeResult, err := profile.Route(c.Context(), req.Model)
-	if err != nil {
-		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+	// 如果规则没有返回路由结果（非 route 类型动作），执行常规路由
+	var err error
+	if routeResult == nil {
+		routeResult, err = profile.Route(c.Context(), req.Model)
+		if err != nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+		}
 	}
 
 	// 使用 OriginalName 进行实际的 API 调用
@@ -212,12 +221,23 @@ func (h *EnhancedAPIHandler) handleClaudeFormat(c fiber.Ctx) error {
 	// 构建规则引擎输入
 	ruleInput := buildRuleEngineInput(c, openAIReq)
 	ruleResult := h.applyRules(profile, ruleInput)
+	var routeResult *service.RouteResult
 	if ruleResult.Matched {
-		*openAIReq = h.applyRuleActions(*openAIReq, ruleResult)
+		var err error
+		*openAIReq, routeResult, err = h.applyRuleActions(c.Context(), profile, *openAIReq, ruleResult)
+		if err != nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+		}
 	}
 
-	// 路由并执行请求
-	routeResult, err := profile.Route(c.Context(), openAIReq.Model)
+	// 如果规则没有返回路由结果（非 route 类型动作），执行常规路由
+	var err error
+	if routeResult == nil {
+		routeResult, err = profile.Route(c.Context(), openAIReq.Model)
+		if err != nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
 	if err != nil {
 		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -266,14 +286,22 @@ func (h *EnhancedAPIHandler) handleOllamaChat(c fiber.Ctx) error {
 	// 构建规则引擎输入
 	ruleInput := buildRuleEngineInput(c, openAIReq)
 	ruleResult := h.applyRules(profile, ruleInput)
+	var routeResult *service.RouteResult
 	if ruleResult.Matched {
-		*openAIReq = h.applyRuleActions(*openAIReq, ruleResult)
+		var err error
+		*openAIReq, routeResult, err = h.applyRuleActions(c.Context(), profile, *openAIReq, ruleResult)
+		if err != nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(ollamaError(err.Error()))
+		}
 	}
 
-	// 路由并执行请求
-	routeResult, err := profile.Route(c.Context(), openAIReq.Model)
-	if err != nil {
-		return c.Status(http.StatusServiceUnavailable).JSON(ollamaError(err.Error()))
+	// 如果规则没有返回路由结果（非 route 类型动作），执行常规路由
+	var err error
+	if routeResult == nil {
+		routeResult, err = profile.Route(c.Context(), openAIReq.Model)
+		if err != nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(ollamaError(err.Error()))
+		}
 	}
 
 	if routeResult.Model != nil && routeResult.Model.OriginalName != "" {
@@ -315,13 +343,22 @@ func (h *EnhancedAPIHandler) handleOllamaGenerate(c fiber.Ctx) error {
 
 	ruleInput := buildRuleEngineInput(c, openAIReq)
 	ruleResult := h.applyRules(profile, ruleInput)
+	var routeResult *service.RouteResult
 	if ruleResult.Matched {
-		*openAIReq = h.applyRuleActions(*openAIReq, ruleResult)
+		var err error
+		*openAIReq, routeResult, err = h.applyRuleActions(c.Context(), profile, *openAIReq, ruleResult)
+		if err != nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(ollamaError(err.Error()))
+		}
 	}
 
-	routeResult, err := profile.Route(c.Context(), openAIReq.Model)
-	if err != nil {
-		return c.Status(http.StatusServiceUnavailable).JSON(ollamaError(err.Error()))
+	// 如果规则没有返回路由结果（非 route 类型动作），执行常规路由
+	var err error
+	if routeResult == nil {
+		routeResult, err = profile.Route(c.Context(), openAIReq.Model)
+		if err != nil {
+			return c.Status(http.StatusServiceUnavailable).JSON(ollamaError(err.Error()))
+		}
 	}
 
 	if routeResult.Model != nil && routeResult.Model.OriginalName != "" {
@@ -533,9 +570,9 @@ func (h *EnhancedAPIHandler) loadRulesForProfile(profileID string) []model.Rule 
 	return rules
 }
 
-func (h *EnhancedAPIHandler) applyRuleActions(req model.ChatCompletionRequest, result *model.RuleMatchResult) model.ChatCompletionRequest {
+func (h *EnhancedAPIHandler) applyRuleActions(ctx context.Context, profile *service.ProfileInstance, req model.ChatCompletionRequest, result *model.RuleMatchResult) (model.ChatCompletionRequest, *service.RouteResult, error) {
 	if !result.Matched {
-		return req
+		return req, nil, nil
 	}
 
 	action := result.Action
@@ -545,6 +582,26 @@ func (h *EnhancedAPIHandler) applyRuleActions(req model.ChatCompletionRequest, r
 		// 使用规则指定的模型
 		if action.Target != "" {
 			req.Model = action.Target
+		}
+	case model.ActionTypeModels:
+		// 从多个模型中负载均衡选择一个
+		if len(action.Targets) > 0 {
+			routeResult, selectedModelName, err := profile.RouteByRuleTargets(ctx, action.Targets, action.Strategy)
+			if err != nil {
+				return req, nil, fmt.Errorf("failed to route via targets: %w", err)
+			}
+			req.Model = selectedModelName
+			return req, routeResult, nil
+		}
+	case model.ActionTypeRoute:
+		// 从指定的路由中选择模型（兼容旧版）
+		if action.Target != "" {
+			routeResult, selectedModelName, err := profile.RouteByRouteID(ctx, action.Target)
+			if err != nil {
+				return req, nil, fmt.Errorf("failed to route via route %s: %w", action.Target, err)
+			}
+			req.Model = selectedModelName
+			return req, routeResult, nil
 		}
 	case model.ActionTypeModifyBody:
 		// 修改请求体参数
@@ -558,7 +615,7 @@ func (h *EnhancedAPIHandler) applyRuleActions(req model.ChatCompletionRequest, r
 		// 参数存储在 action.Target (key) 和 action.Value (value) 中
 	}
 
-	return req
+	return req, nil, nil
 }
 
 func (h *EnhancedAPIHandler) buildCustomHeaders(

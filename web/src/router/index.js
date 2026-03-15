@@ -26,62 +26,62 @@ const routes = [
     path: '/dashboard',
     name: 'Dashboard',
     component: Dashboard,
-    meta: { title: '仪表盘', icon: 'Odometer', requiresAuth: true }
+    meta: { titleKey: 'nav.dashboard', icon: 'Odometer', requiresAuth: true }
   },
 
   {
     path: '/profiles',
     name: 'Profiles',
     component: Profiles,
-    meta: { title: 'Profile 管理', icon: 'Grid', requiresAuth: true }
+    meta: { titleKey: 'nav.profiles', icon: 'Grid', requiresAuth: true }
   },
   {
     path: '/providers',
     name: 'Providers',
     component: Providers,
-    meta: { title: '供应商管理', icon: 'Connection', requiresAuth: true }
+    meta: { titleKey: 'nav.providers', icon: 'Connection', requiresAuth: true }
   },
   {
     path: '/models',
     name: 'Models',
     component: Models,
-    meta: { title: '模型管理', icon: 'Cpu', requiresAuth: true }
+    meta: { titleKey: 'nav.models', icon: 'Cpu', requiresAuth: true }
   },
   {
     path: '/routes',
     name: 'Routes',
     component: Routes,
-    meta: { title: '路由策略', icon: 'Share', requiresAuth: true }
+    meta: { titleKey: 'nav.routes', icon: 'Share', requiresAuth: true }
   },
   {
     path: '/rules',
     name: 'Rules',
     component: Rules,
-    meta: { title: '路由规则', icon: 'Filter', requiresAuth: true }
+    meta: { titleKey: 'nav.rules', icon: 'Filter', requiresAuth: true }
   },
   {
     path: '/stats',
     name: 'Stats',
     component: Stats,
-    meta: { title: '统计数据', icon: 'TrendCharts', requiresAuth: true }
+    meta: { titleKey: 'nav.stats', icon: 'TrendCharts', requiresAuth: true }
   },
   {
     path: '/logs',
     name: 'Logs',
     component: Logs,
-    meta: { title: '请求日志', icon: 'List', requiresAuth: true }
+    meta: { titleKey: 'nav.logs', icon: 'List', requiresAuth: true }
   },
   {
     path: '/server-logs',
     name: 'ServerLogs',
     component: ServerLogs,
-    meta: { title: '服务器日志', icon: 'Monitor', requiresAuth: true }
+    meta: { titleKey: 'nav.serverlogs', icon: 'Monitor', requiresAuth: true }
   },
   {
     path: '/settings',
     name: 'Settings',
     component: Settings,
-    meta: { title: '系统设置', icon: 'Setting', requiresAuth: true }
+    meta: { titleKey: 'nav.settings', icon: 'Setting', requiresAuth: true }
   }
 ]
 

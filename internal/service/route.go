@@ -162,11 +162,11 @@ func (s *RouteService) SelectModelFromRoute(ctx context.Context, routeID string)
 		return nil, fmt.Errorf("route not found: %s", routeID)
 	}
 
-	return s.selectModelFromRouteInstance(ctx, route)
+	return s.SelectModelFromRouteInstance(ctx, route)
 }
 
-// selectModelFromRouteInstance selects a model from a route instance
-func (s *RouteService) selectModelFromRouteInstance(ctx context.Context, route *RouteInstance) (*RouteModelEntryWithModel, error) {
+// SelectModelFromRouteInstance selects a model from a route instance (exported)
+func (s *RouteService) SelectModelFromRouteInstance(ctx context.Context, route *RouteInstance) (*RouteModelEntryWithModel, error) {
 	if len(route.ModelEntries) == 0 {
 		return nil, fmt.Errorf("no models available in route: %s", route.Route.ID)
 	}
@@ -379,7 +379,7 @@ func (s *RouteService) SelectModelFromRoutes(ctx context.Context, routeIDs []str
 	routes := s.GetRoutesByIDs(routeIDs)
 
 	for _, route := range routes {
-		entry, err := s.selectModelFromRouteInstance(ctx, route)
+		entry, err := s.SelectModelFromRouteInstance(ctx, route)
 		if err == nil && entry != nil {
 			return entry, route, nil
 		}

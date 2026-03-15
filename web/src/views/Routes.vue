@@ -1,15 +1,6 @@
 <template>
   <div class="routes">
-    <!-- 面包屑导航 -->
-    <div class="breadcrumb-wrapper">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/' }">Home</el-breadcrumb-item>
-        <el-breadcrumb-item>{{ $t("route.title") }}</el-breadcrumb-item>
-      </el-breadcrumb>
-    </div>
-
     <div class="page-header">
-      <h2>{{ $t('route.title') }}</h2>
       <el-button type="primary" @click="showAddDialog">
         <el-icon><Plus /></el-icon>
         {{ $t('route.addRule') }}
@@ -137,6 +128,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
+
 const { t } = useI18n()
 const store = useAppStore()
 const routeRules = computed(() => store.routeRules)
@@ -256,10 +248,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.breadcrumb-wrapper {
-  margin-bottom: 16px;
-}
-
 .page-header {
   display: flex;
   justify-content: space-between;

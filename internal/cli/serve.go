@@ -216,27 +216,42 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Admin API - Authentication endpoints (public, stricter rate limiting)
 	adminHandler := handler.NewAdminHandler()
 
-	// Separate rate limiter for auth endpoints (login, logout, auth/status)
-	// More restrictive to prevent brute force attacks: 10 attempts per minute
-	authLimiter := limiter.New(limiter.Config{
-		Max:        10,
+	// Separate rate limiter for login endpoint only
+	// More restrictive to prevent brute force attacks: 20 attempts per minute
+	loginLimiter := limiter.New(limiter.Config{
+		Max:        20,
 		Expiration: 1 * 60 * 1000,
 		KeyGenerator: func(c fiber.Ctx) string {
-			return c.IP() + ":auth"
+			return c.IP() + ":login"
 		},
 		LimitReached: func(c fiber.Ctx) error {
 			return c.Status(429).JSON(fiber.Map{
 				"error":   "rate_limit_exceeded",
-				"message": "Too many authentication attempts. Please try again later.",
+				"message": "Too many login attempts. Please try again later.",
 			})
 		},
 	})
 
-	// Register auth endpoints with stricter rate limiting
-	authGroup := app.Group("/api/admin", authLimiter)
-	authGroup.Post("/login", adminHandler.Login)
-	authGroup.Post("/logout", adminHandler.Logout)
-	authGroup.Get("/auth/status", adminHandler.GetAuthStatus)
+	// Light rate limiter for non-login auth endpoints (logout, auth/status)
+	// Higher limit since these are less security-sensitive
+	authStatusLimiter := limiter.New(limiter.Config{
+		Max:        100,
+		Expiration: 1 * 60 * 1000,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":auth_status"
+		},
+		LimitReached: func(c fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{
+				"error":   "rate_limit_exceeded",
+				"message": "Too many requests. Please try again later.",
+			})
+		},
+	})
+
+	// Register login endpoint with stricter rate limiting
+	app.Post("/api/admin/login", loginLimiter, adminHandler.Login)
+	app.Post("/api/admin/logout", authStatusLimiter, adminHandler.Logout)
+	app.Get("/api/admin/auth/status", authStatusLimiter, adminHandler.GetAuthStatus)
 
 	// Protected admin endpoints (require authentication, standard rate limiting)
 	compressionAdminHandler := handler.NewCompressionAdminHandler()

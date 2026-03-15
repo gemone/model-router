@@ -1,19 +1,5 @@
 <template>
     <div class="settings">
-        <!-- 面包屑导航 -->
-        <div class="breadcrumb-wrapper">
-            <el-breadcrumb separator="/">
-                <el-breadcrumb-item :to="{ path: '/' }"
-                    >Home</el-breadcrumb-item
-                >
-                <el-breadcrumb-item>{{
-                    $t("settings.title")
-                }}</el-breadcrumb-item>
-            </el-breadcrumb>
-        </div>
-
-        <h2 class="page-title">{{ $t("settings.title") }}</h2>
-
         <!-- 系统信息卡片 -->
         <el-card class="info-card" shadow="hover">
             <template #header>
@@ -557,6 +543,7 @@ import {
     Edit,
 } from "@element-plus/icons-vue";
 
+
 const { t, locale } = useI18n();
 const store = useAppStore();
 
@@ -945,10 +932,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.breadcrumb-wrapper {
-    margin-bottom: 16px;
-}
-
 .page-title {
     margin-bottom: 24px;
     font-size: 20px;

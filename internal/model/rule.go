@@ -37,10 +37,20 @@ type RuleCondition struct {
 
 // RuleAction 规则动作
 type RuleAction struct {
-	Type    string            `json:"type"`    // 动作类型: route/model/add_header/modify_body/add_param
-	Target  string            `json:"target"`  // 目标路由/模型/字段
-	Value   string            `json:"value"`   // 修改值
-	Headers map[string]string `json:"headers"` // 要添加的请求头
+	Type     string            `json:"type"`     // 动作类型: models/model/add_header/modify_body/add_param
+	Target   string            `json:"target"`   // 目标模型（当 Type=model 时使用）
+	Targets  []RuleTarget      `json:"targets"`  // 目标模型列表（当 Type=models 时使用，支持负载均衡）
+	Strategy string            `json:"strategy"` // 负载均衡策略: auto/priority/weighted/random（当 Type=models 时使用）
+	Value    string            `json:"value"`    // 修改值
+	Headers  map[string]string `json:"headers"`  // 要添加的请求头
+}
+
+// RuleTarget 规则目标模型（带权重和优先级）
+type RuleTarget struct {
+	ModelID  string `json:"model_id"` // 模型ID或名称
+	Weight   int    `json:"weight"`   // 权重（用于加权轮询），默认 100
+	Priority int    `json:"priority"` // 优先级（数值越高越优先），默认 0
+	Enabled  bool   `json:"enabled"`  // 是否启用
 }
 
 // Condition Type 常量
@@ -70,12 +80,13 @@ const (
 
 // Action Type 常量
 const (
-	ActionTypeRoute      = "route"       // 路由到指定路由
+	ActionTypeModels     = "models"      // 负载均衡到多个模型
 	ActionTypeModel      = "model"       // 使用指定模型
 	ActionTypeAddHeader  = "add_header"  // 添加请求头
 	ActionTypeSetHeader  = "set_header"  // 设置请求头
 	ActionTypeModifyBody = "modify_body" // 修改请求体
 	ActionTypeAddParam   = "add_param"   // 添加查询参数
+	ActionTypeRoute      = "route"       // 路由到指定路由（兼容旧版）
 )
 
 // Content Field 常量 (用于 content 类型条件)

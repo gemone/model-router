@@ -1,15 +1,6 @@
 <template>
   <div class="server-logs">
-    <!-- 面包屑导航 -->
-    <div class="breadcrumb-wrapper">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/' }">Home</el-breadcrumb-item>
-        <el-breadcrumb-item>{{ $t('serverLogs.title', '服务器日志') }}</el-breadcrumb-item>
-      </el-breadcrumb>
-    </div>
-
     <div class="page-header">
-      <h2>{{ $t('serverLogs.title', '服务器日志') }}</h2>
       <div class="header-actions">
         <!-- 视图切换 -->
         <el-radio-group v-model="viewMode" size="small" style="margin-right: 12px;">
@@ -24,7 +15,7 @@
           <el-option label="Warn" value="warn" />
           <el-option label="Error" value="error" />
         </el-select>
-        
+
         <el-button @click="refreshLogs" :loading="loading">
           <el-icon><Refresh /></el-icon>
           {{ $t('common.refresh', '刷新') }}
@@ -208,6 +199,7 @@ import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
+
 
 const { t } = useI18n()
 
@@ -475,10 +467,6 @@ onUnmounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-}
-
-.breadcrumb-wrapper {
-  margin-bottom: 16px;
 }
 
 .page-header {
