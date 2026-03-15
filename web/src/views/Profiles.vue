@@ -3,8 +3,12 @@
         <!-- 面包屑导航 -->
         <div class="breadcrumb-wrapper">
             <el-breadcrumb separator="/">
-                <el-breadcrumb-item :to="{ path: '/' }">Home</el-breadcrumb-item>
-                <el-breadcrumb-item>{{ $t("profile.title") }}</el-breadcrumb-item>
+                <el-breadcrumb-item :to="{ path: '/' }"
+                    >Home</el-breadcrumb-item
+                >
+                <el-breadcrumb-item>{{
+                    $t("profile.title")
+                }}</el-breadcrumb-item>
             </el-breadcrumb>
         </div>
 
@@ -21,7 +25,9 @@
                 v-for="(profile, index) in profiles"
                 :key="profile.id"
                 class="profile-card"
-                :style="{ '--accent-color': accentColors[index % accentColors.length] }"
+                :style="{
+                    '--accent-color': accentColors[index % accentColors.length],
+                }"
             >
                 <div class="card-accent"></div>
                 <div class="card-content">
@@ -45,9 +51,13 @@
 
                     <div class="profile-details">
                         <div class="detail-item">
-                            <span class="detail-label">{{ $t("profile.path") }}</span>
+                            <span class="detail-label">{{
+                                $t("profile.path")
+                            }}</span>
                             <div class="endpoint-wrapper">
-                                <code class="endpoint">/api/{{ profile.path }}</code>
+                                <code class="endpoint"
+                                    >/api/{{ profile.path }}</code
+                                >
                                 <el-button
                                     link
                                     size="small"
@@ -62,46 +72,83 @@
                             <span class="detail-label">API 端点格式</span>
                             <div class="api-endpoints">
                                 <div class="endpoint-item">
-                                    <code class="endpoint-small">POST /api/{{ profile.path }}/v1/chat/completions</code>
+                                    <code class="endpoint-small"
+                                        >POST /api/{{
+                                            profile.path
+                                        }}/v1/chat/completions</code
+                                    >
                                 </div>
                                 <div class="endpoint-item">
-                                    <code class="endpoint-small">POST /api/openai/{{ profile.path }}/v1/chat/completions</code>
+                                    <code class="endpoint-small"
+                                        >POST /api/openai/{{
+                                            profile.path
+                                        }}/v1/chat/completions</code
+                                    >
                                 </div>
                                 <div class="endpoint-item">
-                                    <code class="endpoint-small">POST /{{ profile.path }}/v1/chat/completions</code>
+                                    <code class="endpoint-small"
+                                        >POST /{{
+                                            profile.path
+                                        }}/v1/chat/completions</code
+                                    >
                                 </div>
-                                <el-divider class="endpoint-divider">其他格式</el-divider>
+                                <el-divider class="endpoint-divider"
+                                    >其他格式</el-divider
+                                >
                                 <div class="endpoint-item">
-                                    <code class="endpoint-small">POST /api/claude/{{ profile.path }}/v1/messages</code>
+                                    <code class="endpoint-small"
+                                        >POST /api/claude/{{
+                                            profile.path
+                                        }}/v1/messages</code
+                                    >
                                 </div>
                                 <div class="endpoint-item">
-                                    <code class="endpoint-small">POST /api/ollama/{{ profile.path }}/api/chat</code>
+                                    <code class="endpoint-small"
+                                        >POST /api/ollama/{{
+                                            profile.path
+                                        }}/api/chat</code
+                                    >
                                 </div>
                                 <div class="endpoint-item">
-                                    <code class="endpoint-small">POST /api/ollama/{{ profile.path }}/api/generate</code>
+                                    <code class="endpoint-small"
+                                        >POST /api/ollama/{{
+                                            profile.path
+                                        }}/api/generate</code
+                                    >
                                 </div>
                             </div>
                         </div>
                         <div class="detail-item" v-if="profile.api_token_enc">
                             <span class="detail-label">认证状态</span>
-                            <el-tag type="warning" size="small">需要 Token</el-tag>
+                            <el-tag type="warning" size="small"
+                                >需要 Token</el-tag
+                            >
                         </div>
                         <div class="detail-item">
-                            <span class="detail-label">{{ $t("profile.modelsCount") }}</span>
+                            <span class="detail-label">{{
+                                $t("profile.modelsCount")
+                            }}</span>
                             <span class="detail-value">
                                 <el-icon><Cpu /></el-icon>
                                 {{ profile.model_ids?.length || 0 }}
                             </span>
                         </div>
-                        <div class="detail-item" v-if="profile.route_ids?.length > 0">
-                            <span class="detail-label">{{ $t("profile.routesCount") || '路由' }}</span>
+                        <div
+                            class="detail-item"
+                            v-if="profile.route_ids?.length > 0"
+                        >
+                            <span class="detail-label">{{
+                                $t("profile.routesCount") || "路由"
+                            }}</span>
                             <span class="detail-value">
                                 <el-icon><Share /></el-icon>
                                 {{ profile.route_ids?.length || 0 }}
                             </span>
                         </div>
                         <div class="detail-item">
-                            <span class="detail-label">{{ $t("common.priority") }}</span>
+                            <span class="detail-label">{{
+                                $t("common.priority")
+                            }}</span>
                             <el-rate
                                 v-model="profile.priority"
                                 disabled
@@ -183,7 +230,12 @@
                         <el-option
                             v-for="model in store.models"
                             :key="model.id"
-                            :label="model.name + ' (' + (model.original_name || model.name) + ')'"
+                            :label="
+                                model.name +
+                                ' (' +
+                                (model.original_name || model.name) +
+                                ')'
+                            "
                             :value="model.id"
                         />
                     </el-select>
@@ -194,17 +246,29 @@
                         multiple
                         collapse-tags
                         collapse-tags-tooltip
-                        :placeholder="$t('profile.selectRoutes') || '选择路由策略'"
+                        :placeholder="
+                            $t('profile.selectRoutes') || '选择路由策略'
+                        "
                         style="width: 100%"
                     >
                         <el-option
                             v-for="route in store.routeRules"
                             :key="route.id"
-                            :label="route.name + ' (' + (route.strategy || 'auto') + ')'"
+                            :label="
+                                route.name +
+                                ' (' +
+                                (route.strategy || 'auto') +
+                                ')'
+                            "
                             :value="route.id"
                         />
                     </el-select>
-                    <div class="form-tip">{{ $t('profile.routesTip') || '通过路由策略动态选择模型' }}</div>
+                    <div class="form-tip">
+                        {{
+                            $t("profile.routesTip") ||
+                            "通过路由策略动态选择模型"
+                        }}
+                    </div>
                 </el-form-item>
                 <el-form-item label="API Token">
                     <el-input
@@ -214,10 +278,114 @@
                         placeholder="留空则不需要认证"
                     />
                     <div class="form-tip">
-                        为此 Profile 设置独立的访问令牌。如果设置了 Token，客户端需要在请求头中提供
-                        <code>Authorization: Bearer &lt;token&gt;</code> 或查询参数 <code>?token=&lt;token&gt;</code>
+                        为此 Profile 设置独立的访问令牌。如果设置了
+                        Token，客户端需要在请求头中提供
+                        <code>Authorization: Bearer &lt;token&gt;</code>
+                        或查询参数 <code>?token=&lt;token&gt;</code>
                     </div>
                 </el-form-item>
+
+                <!-- 压缩配置 -->
+                <el-divider content-position="left">{{
+                    $t("profile.compressionSettings") || "上下文压缩配置"
+                }}</el-divider>
+                <el-form-item
+                    :label="$t('profile.enableCompression') || '启用压缩'"
+                >
+                    <el-switch v-model="form.enable_compression" />
+                </el-form-item>
+                <template v-if="form.enable_compression">
+                    <el-form-item
+                        :label="$t('profile.compressionStrategy') || '压缩策略'"
+                    >
+                        <el-select
+                            v-model="form.compression_strategy"
+                            style="width: 100%"
+                        >
+                            <el-option
+                                :label="
+                                    $t('profile.strategyRolling') ||
+                                    '滚动窗口 (rolling)'
+                                "
+                                value="rolling"
+                            />
+                            <el-option
+                                :label="
+                                    $t('profile.strategySummary') ||
+                                    '摘要总结 (summary)'
+                                "
+                                value="summary"
+                            />
+                            <el-option
+                                :label="
+                                    $t('profile.strategyHybrid') ||
+                                    '混合模式 (hybrid)'
+                                "
+                                value="hybrid"
+                            />
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item
+                        :label="$t('profile.compressionLevel') || '压缩级别'"
+                    >
+                        <el-select
+                            v-model="form.compression_level"
+                            style="width: 100%"
+                        >
+                            <el-option
+                                :label="
+                                    $t('profile.levelSession') ||
+                                    '每次会话 (session)'
+                                "
+                                value="session"
+                            />
+                            <el-option
+                                :label="
+                                    $t('profile.levelThreshold') ||
+                                    '达到阈值 (threshold)'
+                                "
+                                value="threshold"
+                            />
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item
+                        :label="
+                            $t('profile.compressionThreshold') || '压缩阈值'
+                        "
+                        v-if="form.compression_level === 'threshold'"
+                    >
+                        <el-input-number
+                            v-model="form.compression_threshold"
+                            :min="1000"
+                            :max="100000"
+                            :step="1000"
+                        />
+                        <div class="form-tip">
+                            {{
+                                $t("profile.thresholdTip") ||
+                                "当 token 数量超过此阈值时触发压缩"
+                            }}
+                        </div>
+                    </el-form-item>
+                    <el-form-item
+                        :label="
+                            $t('profile.maxContextWindow') || '最大上下文窗口'
+                        "
+                    >
+                        <el-input-number
+                            v-model="form.max_context_window"
+                            :min="1000"
+                            :max="200000"
+                            :step="1000"
+                        />
+                        <div class="form-tip">
+                            {{
+                                $t("profile.maxContextTip") ||
+                                "最大允许的上下文窗口大小"
+                            }}
+                        </div>
+                    </el-form-item>
+                </template>
             </el-form>
             <template #footer>
                 <el-button @click="dialogVisible = false">{{
@@ -243,14 +411,14 @@ const profiles = computed(() => store.profiles);
 
 // Accent colors for profile cards
 const accentColors = [
-    '#3B82F6', // blue
-    '#10B981', // green
-    '#F59E0B', // amber
-    '#EF4444', // red
-    '#8B5CF6', // violet
-    '#EC4899', // pink
-    '#06B6D4', // cyan
-    '#F97316', // orange
+    "#3B82F6", // blue
+    "#10B981", // green
+    "#F59E0B", // amber
+    "#EF4444", // red
+    "#8B5CF6", // violet
+    "#EC4899", // pink
+    "#06B6D4", // cyan
+    "#F97316", // orange
 ];
 
 const dialogVisible = ref(false);
@@ -265,6 +433,12 @@ const form = ref({
     model_ids: [],
     route_ids: [], // 绑定的路由ID列表
     api_token: "", // API token for profile authentication
+    // Compression settings
+    enable_compression: false,
+    compression_strategy: "rolling",
+    compression_level: "threshold",
+    compression_threshold: 8000,
+    max_context_window: 16000,
 });
 
 const rules = {
@@ -294,6 +468,13 @@ function showAddDialog() {
         enabled: true,
         model_ids: [],
         route_ids: [],
+        api_token: "",
+        // Compression settings
+        enable_compression: false,
+        compression_strategy: "rolling",
+        compression_level: "threshold",
+        compression_threshold: 8000,
+        max_context_window: 16000,
     };
     dialogVisible.value = true;
 }
@@ -464,7 +645,7 @@ onMounted(() => {
     background: #eef2ff;
     padding: 2px 8px;
     border-radius: 4px;
-    font-family: 'Monaco', 'Menlo', monospace;
+    font-family: "Monaco", "Menlo", monospace;
 }
 
 .copy-btn {
