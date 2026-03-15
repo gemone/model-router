@@ -487,6 +487,16 @@ function editProfile(profile) {
 
 async function saveProfile() {
     await formRef.value.validate();
+
+    // Validate compression settings
+    if (form.value.enable_compression) {
+        if (form.value.compression_level === "threshold" &&
+            form.value.compression_threshold >= form.value.max_context_window) {
+            ElMessage.error(t("profile.thresholdTip") || "Compression threshold must be less than max context window");
+            return;
+        }
+    }
+
     try {
         if (isEdit.value) {
             await store.updateProfile(form.value.id, form.value);
