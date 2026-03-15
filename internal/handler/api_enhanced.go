@@ -129,6 +129,16 @@ func (h *EnhancedAPIHandler) processEnhancedChatCompletion(c fiber.Ctx, profileP
 		req.Model = routeResult.Model.OriginalName
 	}
 
+	// 验证 max_tokens 不超过模型限制
+	if routeResult.Model != nil && routeResult.Model.MaxTokens > 0 {
+		if req.MaxTokens > routeResult.Model.MaxTokens {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": fmt.Sprintf("max_tokens exceeds model limit. Request: %d, Model limit: %d", 
+					req.MaxTokens, routeResult.Model.MaxTokens),
+			})
+		}
+	}
+
 	// 添加自定义请求头
 	customHeaders := h.buildCustomHeaders(profile, routeResult, ruleResult)
 	for k, v := range customHeaders {
