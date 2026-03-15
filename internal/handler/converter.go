@@ -90,8 +90,10 @@ type AnthropicRequest struct {
 
 // AnthropicContent represents content in Anthropic's format (for both request and response)
 type AnthropicContent struct {
-	Type       string          `json:"type"`                  // "text", "tool_use", "tool_result", "image"
+	Type       string          `json:"type"`                  // "text", "thinking", "tool_use", "tool_result", "image"
 	Text       string          `json:"text,omitempty"`        // for text type
+	Thinking   string          `json:"thinking,omitempty"`    // for thinking type (reasoning models)
+	Signature  string          `json:"signature,omitempty"`   // for thinking type (optional signature)
 	ID         string          `json:"id,omitempty"`          // for tool_use (tool call id)
 	Name       string          `json:"name,omitempty"`        // for tool_use (tool name)
 	Input      json.RawMessage `json:"input,omitempty"`       // for tool_use (tool arguments)
@@ -277,6 +279,10 @@ func ConvertOpenAIToAnthropic(resp *model.ChatCompletionResponse) *AnthropicResp
 			ID:   resp.ID,
 			Type: "message",
 			Role: "assistant",
+			Content: []AnthropicContent{{
+				Type: "text",
+				Text: "",
+			}},
 		}
 	}
 
@@ -284,6 +290,14 @@ func ConvertOpenAIToAnthropic(resp *model.ChatCompletionResponse) *AnthropicResp
 	
 	// Build content blocks
 	var contentBlocks []AnthropicContent
+	
+	// For reasoning models (like GLM), add thinking block first
+	if choice.Message.ReasoningContent != "" {
+		contentBlocks = append(contentBlocks, AnthropicContent{
+			Type:     "thinking",
+			Thinking: choice.Message.ReasoningContent,
+		})
+	}
 	
 	// Add text content if present
 	if c, ok := choice.Message.Content.(string); ok && c != "" {
