@@ -14,8 +14,52 @@ import (
 	"github.com/gemone/model-router/internal/model"
 )
 
+// upstreamRequest 定义了发送给上游 API 的请求结构
+// 排除了 model-router 内部使用的字段
+type upstreamRequest struct {
+	Model            string         `json:"model"`
+	Messages         []model.Message `json:"messages"`
+	Temperature      *float32       `json:"temperature,omitempty"`
+	TopP             *float32       `json:"top_p,omitempty"`
+	N                *int           `json:"n,omitempty"`
+	Stream           bool           `json:"stream,omitempty"`
+	Stop             interface{}    `json:"stop,omitempty"`
+	MaxTokens        int            `json:"max_tokens,omitempty"`
+	PresencePenalty  float32        `json:"presence_penalty,omitempty"`
+	FrequencyPenalty float32        `json:"frequency_penalty,omitempty"`
+	LogitBias        map[string]int `json:"logit_bias,omitempty"`
+	User             string         `json:"user,omitempty"`
+	Tools            []model.Tool   `json:"tools,omitempty"`
+	ToolChoice       interface{}    `json:"tool_choice,omitempty"`
+	ResponseFormat   interface{}    `json:"response_format,omitempty"`
+}
+
+// toUpstreamRequest 将内部请求转换为上游请求，清理内部字段
+func toUpstreamRequest(req *model.ChatCompletionRequest) *upstreamRequest {
+	return &upstreamRequest{
+		Model:            req.Model,
+		Messages:         req.Messages,
+		Temperature:      req.Temperature,
+		TopP:             req.TopP,
+		N:                req.N,
+		Stream:           req.Stream,
+		Stop:             req.Stop,
+		MaxTokens:        req.MaxTokens,
+		PresencePenalty:  req.PresencePenalty,
+		FrequencyPenalty: req.FrequencyPenalty,
+		LogitBias:        req.LogitBias,
+		User:             req.User,
+		Tools:            req.Tools,
+		ToolChoice:       req.ToolChoice,
+		ResponseFormat:   req.ResponseFormat,
+	}
+}
+
 func init() {
+	// Register with underscore format (current standard)
 	adapter.Register(model.ProviderOpenAICompatible, NewOpenAICompatibleAdapter)
+	// Also register with hyphen format for backward compatibility
+	adapter.Register("openai-compatible", NewOpenAICompatibleAdapter)
 }
 
 // OpenAICompatibleAdapter 通用 OpenAI 兼容适配器
@@ -84,7 +128,10 @@ func (o *OpenAICompatibleAdapter) ChatCompletion(ctx context.Context, req *model
 	if chatPath == "" {
 		chatPath = "/v1/chat/completions"
 	}
-	resp, err := o.DoRequest(ctx, "POST", chatPath, req)
+	// 转换为上游请求，清理内部字段
+	upstreamReq := toUpstreamRequest(req)
+
+	resp, err := o.DoRequest(ctx, "POST", chatPath, upstreamReq)
 	if err != nil {
 		return nil, err
 	}
@@ -113,14 +160,16 @@ func (o *OpenAICompatibleAdapter) ChatCompletion(ctx context.Context, req *model
 
 // ChatCompletionStream 执行流式聊天完成请求
 func (o *OpenAICompatibleAdapter) ChatCompletionStream(ctx context.Context, req *model.ChatCompletionRequest) (<-chan *model.ChatCompletionStreamResponse, error) {
-	req.Stream = true
+	// 转换为上游请求，清理内部字段（Stream 设置为 true）
+	upstreamReq := toUpstreamRequest(req)
+	upstreamReq.Stream = true
 
 	// 使用自定义路径，默认为 /v1/chat/completions
 	chatPath := o.GetProvider().ChatPath
 	if chatPath == "" {
 		chatPath = "/v1/chat/completions"
 	}
-	resp, err := o.DoRequest(ctx, "POST", chatPath, req)
+	resp, err := o.DoRequest(ctx, "POST", chatPath, upstreamReq)
 	if err != nil {
 		return nil, err
 	}
