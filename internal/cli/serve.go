@@ -124,7 +124,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer database.Close()
 
 	// Initialize services
-	service.GetStatsCollector()
+	statsCollector := service.GetStatsCollector()
 	service.GetProfileManager()
 
 	// Initialize default templates
@@ -307,6 +307,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	go func() {
 		<-quit
 		log.Println("Shutting down server...")
+		
+		// Stop background services
+		statsCollector.Stop()
+		
 		if err := app.ShutdownWithTimeout(5 * time.Second); err != nil {
 			log.Printf("Server shutdown error: %v", err)
 		}

@@ -14,6 +14,7 @@ type StatsCollector struct {
 	sync.RWMutex
 	requestLogs []model.RequestLog
 	hourlyStats map[string]*model.Stats // key: date_hour_provider_model
+	quit        chan struct{}         // 用于优雅退出后台 goroutine
 }
 
 var (
@@ -27,10 +28,18 @@ func GetStatsCollector() *StatsCollector {
 		statsCollector = &StatsCollector{
 			requestLogs: make([]model.RequestLog, 0),
 			hourlyStats: make(map[string]*model.Stats),
+			quit:        make(chan struct{}),
 		}
 		go statsCollector.flushLoop()
 	})
 	return statsCollector
+}
+
+// Stop 停止统计收集器，优雅关闭后台 goroutine
+func (sc *StatsCollector) Stop() {
+	if sc.quit != nil {
+		close(sc.quit)
+	}
 }
 
 // RecordRequest 记录请求
@@ -428,8 +437,15 @@ func (sc *StatsCollector) flushLoop() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		sc.flush()
+	for {
+		select {
+		case <-ticker.C:
+			sc.flush()
+		case <-sc.quit:
+			// 优雅退出：最后刷新一次数据
+			sc.flush()
+			return
+		}
 	}
 }
 
