@@ -77,7 +77,7 @@ func TestRuleEngine_Match(t *testing.T) {
 			input: &model.RuleEngineInput{
 				HasImage:    false,
 				Headers:     map[string]string{},
-				CurrentTime: time.Now(),
+				CurrentTime: time.Date(2024, 1, 1, 5, 0, 0, 0, time.UTC), // Outside business hours (9-18)
 			},
 			expected: false,
 			ruleID:   "",
