@@ -3,7 +3,6 @@
         <!-- 页面标题 -->
         <div class="page-header">
             <div class="header-left">
-                <h1 class="page-title">{{ $t("dashboard.title") }}</h1>
                 <el-tag v-if="isLive" type="success" size="small" class="live-tag">
                     <el-icon><VideoPlay /></el-icon>
                     {{ $t("dashboard.realtimeStatus") }}

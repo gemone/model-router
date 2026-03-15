@@ -238,9 +238,6 @@ func (h *EnhancedAPIHandler) handleClaudeFormat(c fiber.Ctx) error {
 			return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
 		}
 	}
-	if err != nil {
-		return c.Status(http.StatusServiceUnavailable).JSON(fiber.Map{"error": err.Error()})
-	}
 
 	if routeResult.Model != nil && routeResult.Model.OriginalName != "" {
 		openAIReq.Model = routeResult.Model.OriginalName

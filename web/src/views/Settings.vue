@@ -932,13 +932,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-title {
-    margin-bottom: 24px;
-    font-size: 20px;
-    font-weight: 600;
-    color: #1f2937;
-}
-
 .info-card {
     margin-bottom: 16px;
 }

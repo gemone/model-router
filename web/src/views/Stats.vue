@@ -1,7 +1,6 @@
 <template>
   <div class="stats">
     <div class="page-header">
-      <h1 class="page-title">{{ $t('stats.title') }}</h1>
       <el-radio-group v-model="timeRange" @change="fetchData" size="small">
         <el-radio-button label="today">{{ $t('stats.today') }}</el-radio-button>
         <el-radio-button label="7d">{{ $t('stats.last7Days') }}</el-radio-button>
