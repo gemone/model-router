@@ -21,6 +21,8 @@ export default {
     status: "状态",
     enabled: "启用",
     disabled: "禁用",
+    enable: "启用",
+    disable: "禁用",
     all: "全部",
     more: "更多",
     detail: "详情",

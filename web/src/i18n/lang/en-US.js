@@ -21,6 +21,8 @@ export default {
     status: "Status",
     enabled: "Enabled",
     disabled: "Disabled",
+    enable: "Enable",
+    disable: "Disable",
     all: "All",
     more: "More",
     detail: "Detail",
