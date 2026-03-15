@@ -217,9 +217,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	adminHandler := handler.NewAdminHandler()
 
 	// Separate rate limiter for login endpoint only
-	// More restrictive to prevent brute force attacks: 20 attempts per minute
+	// Restrictive to prevent brute force attacks: 10 attempts per minute
 	loginLimiter := limiter.New(limiter.Config{
-		Max:        20,
+		Max:        10,
 		Expiration: 1 * 60 * 1000,
 		KeyGenerator: func(c fiber.Ctx) string {
 			return c.IP() + ":login"

@@ -50,7 +50,15 @@ type RuleTarget struct {
 	ModelID  string `json:"model_id"` // 模型ID或名称
 	Weight   int    `json:"weight"`   // 权重（用于加权轮询），默认 100
 	Priority int    `json:"priority"` // 优先级（数值越高越优先），默认 0
-	Enabled  bool   `json:"enabled"`  // 是否启用
+	Enabled  bool   `json:"enabled"`  // 是否启用，默认 true
+}
+
+// Normalize 设置默认值
+func (t *RuleTarget) Normalize() {
+	if t.Weight == 0 {
+		t.Weight = 100
+	}
+	// Priority 默认为 0，无需设置
 }
 
 // Condition Type 常量

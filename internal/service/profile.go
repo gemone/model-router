@@ -20,6 +20,10 @@ import (
 	compressionservice "github.com/gemone/model-router/internal/service/compression"
 )
 
+// pkgRand is a package-level random source seeded once at initialization
+// This ensures proper randomness across server restarts unlike the global rand
+var pkgRand = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 // ruleTargetModel 规则目标模型（内部使用）
 type ruleTargetModel struct {
 	model    *model.Model
@@ -796,7 +800,10 @@ func (pi *ProfileInstance) RouteByRuleTargets(ctx context.Context, targets []mod
 	// 加载目标模型
 	var models []ruleTargetModel
 
-	for _, t := range targets {
+	for i := range targets {
+		// 设置默认值
+		targets[i].Normalize()
+		t := targets[i]
 		if !t.Enabled {
 			continue
 		}
@@ -895,7 +902,7 @@ func (pi *ProfileInstance) selectByWeightFromTargets(models []ruleTargetModel) *
 		return models[0].model
 	}
 
-	target := rand.Intn(totalWeight)
+	target := pkgRand.Intn(totalWeight)
 	cumulative := 0
 	for _, tm := range models {
 		cumulative += tm.weight
@@ -908,7 +915,7 @@ func (pi *ProfileInstance) selectByWeightFromTargets(models []ruleTargetModel) *
 
 // selectByRandomFromTargets 随机选择
 func (pi *ProfileInstance) selectByRandomFromTargets(models []ruleTargetModel) *model.Model {
-	return models[rand.Intn(len(models))].model
+	return models[pkgRand.Intn(len(models))].model
 }
 
 // selectByAutoFromTargets 自动选择（综合评分）
